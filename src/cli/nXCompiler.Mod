@@ -213,6 +213,60 @@ MODULE nXCompiler;  (** command-line version *)
   END CompileFile;
 
 
+PROCEDURE Help*;
+BEGIN
+  Out.String("Oberon Portable Compiler - Command Line Version"); Out.Ln;
+  Out.Ln;
+  Out.String("USAGE:"); Out.Ln;
+  Out.String("  nXCompiler.Compile [options] file1.Mod [file2.Mod ...]"); Out.Ln;
+  Out.Ln;
+  Out.String("OPTIONS:"); Out.Ln;
+  Out.String("  Runtime Checks (prefix with / or \\ to disable):"); Out.Ln;
+  Out.String("    /x   Disable index checking"); Out.Ln;
+  Out.String("    /v   Disable overflow checking"); Out.Ln;
+  Out.String("    /t   Disable type checking"); Out.Ln;
+  Out.String("    /p   Disable pointer initialization"); Out.Ln;
+  Out.String("    /a   Disable assertions"); Out.Ln;
+  Out.String("    /z   Disable full stack initialization"); Out.Ln;
+  Out.String("    /q   Disable trace"); Out.Ln;
+  Out.Ln;
+  Out.String("  Symbol Files:"); Out.Ln;
+  Out.String("    /s   Generate new symbol file"); Out.Ln;
+  Out.String("    /e   Generate extended symbol file"); Out.Ln;
+  Out.Ln;
+  Out.String("  Language Modes:"); Out.Ln;
+  Out.String("    /1   Oberon-1 mode"); Out.Ln;
+  Out.String("    /2   Oberon-2 mode"); Out.Ln;
+  Out.Ln;
+  Out.String("  Other Options:"); Out.Ln;
+  Out.String("    /S   Enable system checking"); Out.Ln;
+  Out.String("    /n   No files mode"); Out.Ln;
+  Out.String("    /f   Find PC mode"); Out.Ln;
+  Out.String("    /w   Enable warnings"); Out.Ln;
+  Out.String("    /X   Use module name as prefix"); Out.Ln;
+  Out.String("    /T   Trace procedures"); Out.Ln;
+  Out.Ln;
+  Out.String("  Output Control:"); Out.Ln;
+  Out.String("    /.ext      Set output extension (e.g., /.Obj)"); Out.Ln;
+  Out.String("    /Ppath     Set output path (e.g., /Px86/)"); Out.Ln;
+  Out.String("    /Oprefix   Set output prefix"); Out.Ln;
+  Out.Ln;
+  Out.String("EXAMPLES:"); Out.Ln;
+  Out.String("  Compile with default options:"); Out.Ln;
+  Out.String("    nXCompiler.Compile Test.Mod"); Out.Ln;
+  Out.Ln;
+  Out.String("  Compile with new symbol file:"); Out.Ln;
+  Out.String("    nXCompiler.Compile /s MyModule.Mod"); Out.Ln;
+  Out.Ln;
+  Out.String("  Compile multiple files without checks:"); Out.Ln;
+  Out.String("    nXCompiler.Compile /x /v /t File1.Mod File2.Mod"); Out.Ln;
+  Out.Ln;
+  Out.String("  Compile to specific directory:"); Out.Ln;
+  Out.String("    nXCompiler.Compile /Px86/ Test.Mod"); Out.Ln;
+  Out.Ln;
+END Help;
+
+
 PROCEDURE Compile*;
 VAR
   S: Texts.Scanner;
@@ -228,11 +282,20 @@ BEGIN
   Texts.OpenScanner(S, Oberon.Par.text, Oberon.Par.pos);
   Texts.Scan(S);
 
+  (* Check for help request or no arguments *)
   IF S.class = Texts.Inval THEN
-    Out.String("Usage: Compile [\\options] file1.Mod file2.Mod ..."); Out.Ln;
-    Out.String("Options: x v t p a z q s S n e f w X 2 1 T"); Out.Ln;
-    Out.String("  .ext  Ppath  Oprefix"); Out.Ln;
+    Help;
     RETURN
+  END;
+  
+  (* Check for help options *)
+  IF S.class = Texts.Name THEN
+    IF (S.s = "/help") OR (S.s = "/h") OR (S.s = "/?") OR 
+       (S.s = "\help") OR (S.s = "\h") OR (S.s = "\?") OR
+       (S.s = "-help") OR (S.s = "-h") OR (S.s = "--help") THEN
+      Help;
+      RETURN
+    END
   END;
 
   (* Process arguments from scanner - fixed loop structure *)
