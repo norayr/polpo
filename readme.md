@@ -16,6 +16,12 @@ This is an attempt to contunie development of ETH Linux Oberon in some way.
 
 Type `make` and `wishup` shell will load object files from x86 directory and rebuild link itself as static Linux binary.
 
+Look at [compiler options](compiler_options.md) or do
+
+```
+ ./wishup nXCompiler.Help
+```
+
 Wait for us for updates, or join #oberon on irc.libera.chat and help with development!
 
 Till.
