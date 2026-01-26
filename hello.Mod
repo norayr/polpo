@@ -4,6 +4,6 @@ IMPORT nOut;
 PROCEDURE world*;
 BEGIN
   nOut.String("hey hey!"); nOut.Ln;
-END a;
+END world;
 
 END hello.
