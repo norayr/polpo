@@ -51,6 +51,8 @@ But wait, it can also draw itself in other ways! Just replace the Display module
 
 ### xterm Oberon
 
+![](polpo.png)
+
 Oberon can draw itself not only in X11, but in a bitmap graphics capable Unix terminal, such as xterm.
 For that you need to compile other version of Display and Input modules.
 
