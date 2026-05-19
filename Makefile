@@ -75,3 +75,15 @@ all:
 		./wishup nXCompiler.Compile src/polpo/POLPO.XDecoder.Mod
 		./wishup nXCompiler.Compile src/polpo/POLPO.XBrowser.Mod
 		./wishup nXBootLinker.Link xoberon /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/Modules "~"
+
+
+
+sixel:
+		./wishup nXCompiler.Compile /x src/polpo/POLPO.SXL.Display.Mod
+		./wishup nXCompiler.Compile src/polpo/POLPO.SXL.Input.Mod
+
+x11:
+		./wishup nXCompiler.Compile /x src/polpo/POLPO.Display.Mod
+		./wishup nXCompiler.Compile src/polpo/POLPO.Input.Mod
+
+
