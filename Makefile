@@ -4,7 +4,7 @@ fast:
 		./wishup < build.Tool
 
 
-all:
+slow:
 		# common files for ui and cli oberon
 		./wishup nXCompiler.Compile src/polpo/POLPO.X86.Linux0.Mod
 		./wishup nXCompiler.Compile src/polpo/POLPO.X86.Kernel.Mod
