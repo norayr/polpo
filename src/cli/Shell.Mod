@@ -1,5 +1,5 @@
 MODULE Shell;
-IMPORT nOut, Kernel, nModules, nOberon, nTexts,
+IMPORT nIn, nOut, Kernel, nModules, nOberon, nTexts,
    ooc2Strings;
 
 PROCEDURE extractModandProc(VAR cmd, mod, proc: ARRAY OF CHAR);
@@ -42,6 +42,51 @@ BEGIN
   nTexts.Append(text, W.buf);
 END BuildParamText;
 
+PROCEDURE Interactive;
+VAR
+  line: ARRAY 256 OF CHAR;
+  cmd, name: ARRAY 64 OF CHAR;
+  params: ARRAY 256 OF CHAR;
+  par: nOberon.ParList;
+  W: nTexts.Writer;
+  i, j: INTEGER;
+  res: INTEGER;
+  quit: BOOLEAN;
+BEGIN
+  nIn.Open;
+  quit := FALSE;
+  WHILE ~quit DO
+    nOut.String("> ");
+    nIn.Line(line);
+    IF ~nIn.Done THEN quit := TRUE
+    ELSIF line[0] = 0X THEN (* skip empty line *)
+    ELSIF line[0] = '#' THEN (* skip comment line *)
+    ELSIF ooc2Strings.Equal(line, "quit") OR ooc2Strings.Equal(line, "exit") THEN
+      quit := TRUE
+    ELSE
+      (* split at first space: before = command, after = params *)
+      i := 0;
+      WHILE (line[i] # 0X) & (line[i] # ' ') DO INC(i) END;
+      j := 0; WHILE j < i DO cmd[j] := line[j]; INC(j) END; cmd[j] := 0X;
+      WHILE line[i] = ' ' DO INC(i) END;
+      j := 0; WHILE line[i] # 0X DO params[j] := line[i]; INC(j); INC(i) END; params[j] := 0X;
+
+      NEW(par); NEW(par.text); nTexts.Open(par.text, ""); par.pos := 0;
+      IF params[0] # 0X THEN
+        nTexts.OpenWriter(W);
+        nTexts.WriteString(W, params);
+        nTexts.Append(par.text, W.buf)
+      END;
+
+      COPY(cmd, name);  (* nOberon.Call modifies name in place *)
+      nOberon.Call(name, par, FALSE, res);
+      IF res # 0 THEN
+        nOut.String("error "); nOut.Int(res, 0); nOut.Ln
+      END
+    END
+  END
+END Interactive;
+
 PROCEDURE Run*;
 VAR
   cmd: ARRAY 64 OF CHAR;
@@ -50,11 +95,8 @@ VAR
   par: nOberon.ParList;
 BEGIN
   IF Kernel.NoOfArgs < 2 THEN
-    nOut.String("Usage: shell Module.Procedure [arguments...]");
-    nOut.Ln;
-    nOut.String("Example: shell nXCompiler.Compile Test.Mod \\s");
-    nOut.Ln;
-    Kernel.Shutdown(1);
+    Interactive;
+    Kernel.Shutdown(0)
   END;
 
   (* Get the command from arg 1 *)
