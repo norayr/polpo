@@ -33,8 +33,8 @@ CONST
   NameOfs   = 19;  (* char[]: null-terminated filename *)
 
   (* d_type values from <dirent.h> *)
-  DT_UNKNOWN = 0; DT_FIFO = 1; DT_CHR = 2; DT_DIR = 4;
-  DT_BLK = 6; DT_REG = 8; DT_LNK = 10; DT_SOCK = 12;
+  DTUnk = 0; DTFifo = 1; DTChr = 2; DTDir = 4;
+  DTBlk = 6; DTReg = 8; DTLnk = 10; DTSock = 12;
 
 TYPE
   (* Same signature as Native Oberon FATFiles.EntryHandler *)
@@ -157,7 +157,7 @@ END ModeToAttr;
     res = 0 on success, positive errno on failure. *)
 PROCEDURE Enumerate*(path: ARRAY OF CHAR; handler: EntryHandler; VAR res: LONGINT);
 VAR
-  fd, n, sres: LONGINT;
+  fd, n, sres, mode: LONGINT;
   pos, reclen: LONGINT;
   reclenI: INTEGER;
   dtype: CHAR;
@@ -219,17 +219,18 @@ BEGIN
           IF sres = 0 THEN
             size := st.size;
             UnixToOberon(st.mtime, time, date);
-            attr := ModeToAttr(st.x1)
+            SYSTEM.GET(SYSTEM.ADR(st) + 16, mode);
+            attr := ModeToAttr(mode)
           ELSE
             (* stat failed: fall back to d_type for attr, zero size/time *)
             size := 0; time := 0; date := 0; attr := {};
-            IF    ORD(dtype) = DT_DIR  THEN INCL(attr, SubDir)
-            ELSIF ORD(dtype) = DT_REG  THEN INCL(attr, Archive)
-            ELSIF ORD(dtype) = DT_LNK  THEN INCL(attr, SymLink)
-            ELSIF ORD(dtype) = DT_CHR  THEN INCL(attr, CharDev)
-            ELSIF ORD(dtype) = DT_BLK  THEN INCL(attr, BlockDev)
-            ELSIF ORD(dtype) = DT_FIFO THEN INCL(attr, FIFO)
-            ELSIF ORD(dtype) = DT_SOCK THEN INCL(attr, Socket)
+            IF    ORD(dtype) = DTDir  THEN INCL(attr, SubDir)
+            ELSIF ORD(dtype) = DTReg  THEN INCL(attr, Archive)
+            ELSIF ORD(dtype) = DTLnk  THEN INCL(attr, SymLink)
+            ELSIF ORD(dtype) = DTChr  THEN INCL(attr, CharDev)
+            ELSIF ORD(dtype) = DTBlk  THEN INCL(attr, BlockDev)
+            ELSIF ORD(dtype) = DTFifo THEN INCL(attr, FIFO)
+            ELSIF ORD(dtype) = DTSock THEN INCL(attr, Socket)
             END
           END;
           handler(name, time, date, size, attr, continue)
