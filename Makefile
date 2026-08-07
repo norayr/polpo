@@ -13,7 +13,9 @@ all:
 		./wishup nXCompiler.Compile src/cli/ooc2Strings.Mod
 		./wishup nXCompiler.Compile src/cli/nTexts.Mod
 		./wishup nXCompiler.Compile src/cli/nOberon.Mod
+		./wishup nXCompiler.Compile src/cli/nIn.Mod
 		./wishup nXCompiler.Compile src/cli/Shell.Mod
+		./wishup nXCompiler.Compile src/polpo/POLPO.FATFiles.Mod
 
 		# cli compiler
 		./wishup nXCompiler.Compile src/cli/nOPM.Mod
