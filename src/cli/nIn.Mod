@@ -25,6 +25,15 @@ BEGIN
   IF n = 1 THEN readstate := ready ELSE readstate := eof END
 END ReadChar;
 
+(* Read exactly one byte from stdin without touching the internal state machine.
+   Returns TRUE on success. For use with cbreak mode where every keypress matters. *)
+PROCEDURE ReadRaw*(VAR ch: CHAR): BOOLEAN;
+VAR n: LONGINT;
+BEGIN
+  n := Linux0.Read0(0, SYSTEM.ADR(ch), 1);
+  RETURN n = 1
+END ReadRaw;
+
 PROCEDURE StartRead;
 BEGIN IF readstate = pending THEN ReadChar END
 END StartRead;

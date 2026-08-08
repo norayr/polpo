@@ -42,7 +42,7 @@ BEGIN
   nTexts.Append(text, W.buf);
 END BuildParamText;
 
-PROCEDURE Interactive;
+PROCEDURE Interactive*;
 VAR
   line: ARRAY 256 OF CHAR;
   cmd, name: ARRAY 64 OF CHAR;

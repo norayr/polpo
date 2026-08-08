@@ -11,7 +11,8 @@ nXCompiler.Compile src/cli/ooc2Strings.Mod
 nXCompiler.Compile src/cli/nTexts.Mod
 nXCompiler.Compile src/cli/nOberon.Mod
 nXCompiler.Compile src/cli/nIn.Mod
-nXCompiler.Compile src/cli/Shell.Mod
+nXCompiler.Compile src/cli/nTermios.Mod
+nXCompiler.Compile src/cli/nShell.Mod
 nXCompiler.Compile src/polpo/POLPO.FATFiles.Mod
 
 # cli compiler
@@ -28,7 +29,7 @@ nXCompiler.Compile src/cli/nOPV.Mod
 nXCompiler.Compile src/cli/nXCompiler.Mod
 nXCompiler.Compile src/cli/nXBootLinker.Mod
 
-nXBootLinker.Link wishup2 /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/nOut x86/nModules ~
+nXBootLinker.Link loksh2 /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/nOut x86/nModules ~
 
 # ui oberon
 nXCompiler.Compile src/polpo/POLPO.X86.Modules.Mod

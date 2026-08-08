@@ -66,7 +66,6 @@ VAR
   *)
   imported, importing: ModuleName;  (* Specifies the modules involved in a key mismatch. *)
   trace: BOOLEAN;
-
   loop: Command;
 
 TYPE
@@ -826,10 +825,9 @@ BEGIN
 END InstallTermHandler;
 
 BEGIN
-(*  extension := ".Obj";*)
   trace := TRUE;
-  Kernel.Static:=FALSE;
-  loop := ThisCommand(ThisMod("Shell"), "Run");
+  Kernel.Static := FALSE;
+  loop := ThisCommand(ThisMod("nShell"), "Run");
   loop;
 END nModules.
 
