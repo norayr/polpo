@@ -881,15 +881,26 @@ END WriteLongRealHex;
     NEW(u); u.len := MAX(LONGINT); (*u.fnt := FontsDefault;*)u.fnt := NIL; u.col := Displaywhite;
     T.head := u; ecnt := 0; fcnt := 0;
     msg.id := load; msg.r := r;
-    Files.ReadLInt(msg.r, hlen); (*!!!org := pos + hlen;*) org := pos -2 + hlen; pos := org; Files.Read(msg.r, fno);
-    WHILE fno # 0 DO
-      IF fno > fcnt THEN fcnt := fno; Files.ReadString(msg.r, name); fnts[fno] := FontsThis(name) END;
-      Files.Read(msg.r, col); Files.Read(msg.r, voff); Files.ReadLInt(msg.r, plen);
-      IF plen > 0 THEN NEW(p); p.file := f; p.org := pos; p.ascii := FALSE; un := p; un.len := plen
-      ELSE LoadElem(msg.r, pos - org, -plen, e); un := e; un.len := 1
+    Files.ReadLInt(msg.r, hlen); (*!!!org := pos + hlen;*) org := pos -2 + hlen; pos := org;
+    Files.Read(msg.r, fno);
+    (* Position-based termination: the last 4 bytes of the header are tlen;
+       the 0X before them is the terminator. When we read it, Files.Pos hits org-4 and we stop.
+       This also handles POLPO NoSpex files where fno=0 mid-stream means an object piece. *)
+    WHILE Files.Pos(msg.r) < org - 4 DO
+      IF fno = 0 THEN
+        (* POLPO NoSpex object piece (lib index 0 = obs library): skip content bytes *)
+        Files.Read(msg.r, col); Files.Read(msg.r, voff); Files.ReadLInt(msg.r, plen);
+        INC(pos, plen)
+      ELSE
+        IF fno > fcnt THEN fcnt := fno; Files.ReadString(msg.r, name); fnts[fno] := FontsThis(name) END;
+        Files.Read(msg.r, col); Files.Read(msg.r, voff); Files.ReadLInt(msg.r, plen);
+        IF plen > 0 THEN NEW(p); p.file := f; p.org := pos; p.ascii := FALSE; un := p; un.len := plen
+        ELSE LoadElem(msg.r, pos - org, -plen, e); un := e; un.len := 1
+        END;
+        un.fnt := fnts[fno]; un.col := col; un.voff := voff;
+        INC(pos, un.len); u.next := un; un.prev := u; u := un
       END;
-      (*un.fnt := fnts[fno];*) un.col := col; un.voff := voff;
-      INC(pos, un.len); u.next := un; un.prev := u; u := un; Files.Read(msg.r, fno)
+      Files.Read(msg.r, fno)
     END;
     u.next := T.head; T.head.prev := u; T.cache := T.head; T.corg := 0;
     Files.ReadLInt(msg.r, T.len); Files.Set(r, f, Files.Pos(msg.r) + T.len)
