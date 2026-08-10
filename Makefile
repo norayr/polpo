@@ -20,6 +20,7 @@ slow:
 		./loksh nXCompiler.Compile src/cli/nIn.Mod
 		./loksh nXCompiler.Compile src/cli/nTermios.Mod
 		./loksh nXCompiler.Compile src/cli/nShell.Mod
+		./loksh nXCompiler.Compile src/cli/nCat.Mod
 		./loksh nXCompiler.Compile src/polpo/POLPO.FATFiles.Mod
 
 		# cli compiler

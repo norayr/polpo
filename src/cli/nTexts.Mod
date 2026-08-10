@@ -462,6 +462,16 @@ MODULE nTexts;  (** CAS/HM 23.9.93 -- interface based on Texts by JG/NW 6.12.91*
     RETURN R.org + R.off
   END Pos;
 
+  PROCEDURE FontName* (VAR R: Reader; VAR name: ARRAY OF CHAR);
+  VAR i: INTEGER;
+  BEGIN
+    IF R.fnt = NIL THEN name[0] := 0X
+    ELSE i := 0;
+      WHILE (R.fnt.name[i] # 0X) & (i < LEN(name)-1) DO name[i] := R.fnt.name[i]; INC(i) END;
+      name[i] := 0X
+    END
+  END FontName;
+
 
   (** Scanners --------------- NW --------------- **)
 

@@ -13,6 +13,7 @@ nXCompiler.Compile src/cli/nOberon.Mod
 nXCompiler.Compile src/cli/nIn.Mod
 nXCompiler.Compile src/cli/nTermios.Mod
 nXCompiler.Compile src/cli/nShell.Mod
+nXCompiler.Compile src/cli/nCat.Mod
 nXCompiler.Compile src/polpo/POLPO.FATFiles.Mod
 
 # cli compiler
