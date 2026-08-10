@@ -17,8 +17,11 @@ CONST
   CR  = 0DX;
   BS  = 8X;
   DEL = 7FX;
-  ETX = 3X;  (* Ctrl+C: cancel current line *)
-  EOT = 4X;  (* Ctrl+D: exit if buffer empty *)
+  ESC = 1BX;  (* start of VT100 escape sequence *)
+  ETX = 3X;   (* Ctrl+C: cancel current line *)
+  EOT = 4X;   (* Ctrl+D: exit if buffer empty *)
+
+  MaxHist = 64;
 
 PROCEDURE Erase;
 BEGIN nOut.Char(BS); nOut.Char(' '); nOut.Char(BS)
@@ -255,12 +258,70 @@ BEGIN
   END
 END TryComplete;
 
+(* ---- command history ----------------------------------------------- *)
+
+VAR
+  hist:         ARRAY MaxHist OF ARRAY 256 OF CHAR;
+  histCount:    INTEGER;   (* number of stored entries *)
+  histIdx:      INTEGER;   (* browse position; -1 = not browsing *)
+  histSaved:    ARRAY 256 OF CHAR;  (* line saved when browsing starts *)
+  histSavedLen: INTEGER;
+
+PROCEDURE AddHist(VAR buf: ARRAY OF CHAR; len: INTEGER);
+VAR i: INTEGER;
+BEGIN
+  IF len = 0 THEN RETURN END;
+  (* skip duplicate of most recent entry *)
+  IF (histCount > 0) & ooc2Strings.Equal(hist[histCount - 1], buf) THEN RETURN END;
+  IF histCount < MaxHist THEN
+    COPY(buf, hist[histCount]); INC(histCount)
+  ELSE
+    i := 0; WHILE i < MaxHist - 1 DO hist[i] := hist[i + 1]; INC(i) END;
+    COPY(buf, hist[MaxHist - 1])
+  END
+END AddHist;
+
+PROCEDURE HistReplace(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; VAR src: ARRAY OF CHAR);
+VAR i: INTEGER;
+BEGIN
+  WHILE len > 0 DO DEC(len); Erase END;
+  COPY(src, buf);
+  len := 0; WHILE buf[len] # 0X DO INC(len) END;
+  i := 0; WHILE i < len DO nOut.Char(buf[i]); INC(i) END
+END HistReplace;
+
+PROCEDURE HistUp(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+BEGIN
+  IF histCount = 0 THEN RETURN END;
+  IF histIdx = -1 THEN
+    COPY(buf, histSaved); histSavedLen := len;
+    histIdx := histCount - 1
+  ELSIF histIdx > 0 THEN
+    DEC(histIdx)
+  ELSE
+    RETURN
+  END;
+  HistReplace(buf, len, hist[histIdx])
+END HistUp;
+
+PROCEDURE HistDown(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+BEGIN
+  IF histIdx = -1 THEN RETURN END;
+  IF histIdx < histCount - 1 THEN
+    INC(histIdx);
+    HistReplace(buf, len, hist[histIdx])
+  ELSE
+    histIdx := -1;
+    HistReplace(buf, len, histSaved)
+  END
+END HistDown;
+
 (* ---- cbreak input -------------------------------------------------- *)
 
 PROCEDURE ReadLine(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; VAR quit: BOOLEAN);
 VAR ch: CHAR; ok: BOOLEAN;
 BEGIN
-  len := 0; quit := FALSE;
+  len := 0; quit := FALSE; histIdx := -1;
   LOOP
     ok := nIn.ReadRaw(ch);
     IF ~ok OR (ch = EOT) THEN
@@ -269,12 +330,23 @@ BEGIN
     ELSIF ch = ETX THEN
       len := 0; nOut.Char(LF); EXIT
     ELSIF (ch = CR) OR (ch = LF) THEN
+      AddHist(buf, len);
       nOut.Char(LF); EXIT
     ELSIF (ch = BS) OR (ch = DEL) THEN
       IF len > 0 THEN DEC(len); Erase END
     ELSIF ch = TAB THEN
       buf[len] := 0X;
       TryComplete(buf, len)
+    ELSIF ch = ESC THEN
+      ok := nIn.ReadRaw(ch);
+      IF ok & (ch = '[') THEN
+        ok := nIn.ReadRaw(ch);
+        IF ok THEN
+          IF    ch = 'A' THEN HistUp(buf, len)
+          ELSIF ch = 'B' THEN HistDown(buf, len)
+          END
+        END
+      END
     ELSIF ch >= 20X THEN
       IF len < LEN(buf) - 1 THEN
         buf[len] := ch; INC(len); nOut.Char(ch)
