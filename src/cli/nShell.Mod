@@ -4,9 +4,12 @@ MODULE nShell;
     Three modes decided at startup:
       args given  → run one command and exit  (loksh Module.Proc [params])
       no args, tty → cbreak with per-keypress echo and Tab completion
-      no args, pipe → line-buffered batch mode *)
+      no args, pipe → line-buffered batch mode
 
-IMPORT nIn, nOut, nTermios, Kernel, nOberon, nTexts, ooc2Strings;
+    Tab completion scans x86/*.Obj on every keypress — no startup cache,
+    no rehash needed; always reflects the latest compiled state. *)
+
+IMPORT nIn, nOut, nTermios, Kernel, Files, FATFiles, nOberon, nTexts, ooc2Strings;
 
 CONST
   TAB = 9X;
@@ -21,51 +24,239 @@ PROCEDURE Erase;
 BEGIN nOut.Char(BS); nOut.Char(' '); nOut.Char(BS)
 END Erase;
 
-(* Complete a module name prefix in buf[0..len-1].
-   Unique match: appends remaining chars + '.' to buf and screen.
-   Multiple matches: prints candidates, reprints prompt + current buf. *)
-PROCEDURE TryComplete(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+(* ---- .Obj parsing helpers ----------------------------------------- *)
+
+PROCEDURE ObjReadStr(VAR R: Files.Rider; VAR s: ARRAY OF CHAR);
+VAR i: INTEGER; ch: CHAR;
+BEGIN
+  i := 0;
+  LOOP
+    Files.Read(R, ch);
+    IF ch = 0X THEN s[i] := 0X; RETURN
+    ELSIF ch > 7FX THEN s[i] := CHR(ORD(ch) - 80H); s[i+1] := 0X; RETURN
+    ELSE s[i] := ch; INC(i)
+    END
+  END
+END ObjReadStr;
+
+PROCEDURE ObjReadU16(VAR R: Files.Rider; VAR u: LONGINT);
+VAR lo, hi: CHAR;
+BEGIN
+  Files.Read(R, lo); Files.Read(R, hi);
+  u := 256 * LONG(ORD(hi)) + ORD(lo)
+END ObjReadU16;
+
+(* Position rider at start of CmdBlk; returns nofCmds, or -1 on error. *)
+PROCEDURE ObjSeekCmds(VAR R: Files.Rider): INTEGER;
 VAR
-  m: Kernel.Module;
-  i, matched: INTEGER;
-  first: Kernel.Name;
+  tag: CHAR;
+  symSize, refSize, dataSize, conSize, codeSize, n: LONGINT;
+  nofEntries, nofCmds, nofPtrs, nofTds, nofImps, nofDL, nofLinks: INTEGER;
+  dummy: ARRAY 64 OF CHAR;
+  i: INTEGER;
+BEGIN
+  Files.Read(R, tag); IF tag # 0BBX THEN RETURN -1 END;
+  Files.Read(R, tag); IF tag # 0AFX THEN RETURN -1 END;
+  Files.ReadNum(R, symSize);
+  Files.Set(R, Files.Base(R), Files.Pos(R) + symSize);
+  Files.ReadLInt(R, refSize);
+  Files.ReadInt(R, nofEntries); Files.ReadInt(R, nofCmds);
+  Files.ReadInt(R, nofPtrs);   Files.ReadInt(R, nofTds);
+  Files.ReadInt(R, nofImps);   Files.ReadInt(R, nofDL);
+  Files.ReadInt(R, nofLinks);
+  Files.ReadLInt(R, dataSize);
+  ObjReadU16(R, conSize); ObjReadU16(R, codeSize);
+  ObjReadStr(R, dummy);            (* module name *)
+  Files.Read(R, tag); IF tag # 082X THEN RETURN -1 END;  (* EntryBlk *)
+  i := 0; WHILE i < nofEntries DO ObjReadU16(R, n); INC(i) END;
+  Files.Read(R, tag); IF tag # 083X THEN RETURN -1 END;  (* CmdBlk *)
+  RETURN nofCmds
+END ObjSeekCmds;
+
+(* ---- procedure-name completion ------------------------------------- *)
+
+PROCEDURE ReprintLine(VAR buf: ARRAY OF CHAR; len: INTEGER);
+VAR i: INTEGER;
+BEGIN
+  nOut.Char(LF); nOut.String("> ");
+  i := 0; WHILE i < len DO nOut.Char(buf[i]); INC(i) END
+END ReprintLine;
+
+(* Complete proc name after dot from in-memory cmds of a loaded module. *)
+PROCEDURE CompleteProcMem(m: Kernel.Module;
+                           VAR buf: ARRAY OF CHAR; VAR len: INTEGER;
+                           dotpos, pfxlen: INTEGER);
+VAR
+  first: ARRAY 64 OF CHAR;
+  i, j, matched: INTEGER;
 BEGIN
   matched := 0;
-  m := Kernel.modules;
-  WHILE m # NIL DO
-    i := 0;
-    WHILE (i < len) & (buf[i] = m.name[i]) DO INC(i) END;
-    IF i = len THEN
+  i := 0;
+  WHILE i < LEN(m.cmds^) DO
+    j := 0;
+    WHILE (j < pfxlen) & (buf[dotpos+1+j] = m.cmds[i].name[j]) DO INC(j) END;
+    IF j = pfxlen THEN
       INC(matched);
-      IF matched = 1 THEN COPY(m.name, first) END
+      IF matched = 1 THEN COPY(m.cmds[i].name, first) END
     END;
-    m := m.next
+    INC(i)
   END;
   IF matched = 1 THEN
-    i := len;
-    WHILE (first[i] # 0X) & (len < LEN(buf) - 2) DO
-      nOut.Char(first[i]); buf[len] := first[i]; INC(len); INC(i)
+    j := pfxlen;
+    WHILE (first[j] # 0X) & (len < LEN(buf) - 1) DO
+      nOut.Char(first[j]); buf[len] := first[j]; INC(len); INC(j)
+    END
+  ELSIF matched > 1 THEN
+    nOut.Char(LF);
+    i := 0;
+    WHILE i < LEN(m.cmds^) DO
+      j := 0;
+      WHILE (j < pfxlen) & (buf[dotpos+1+j] = m.cmds[i].name[j]) DO INC(j) END;
+      IF j = pfxlen THEN nOut.String(m.cmds[i].name); nOut.Char(' ') END;
+      INC(i)
+    END;
+    ReprintLine(buf, len)
+  END
+END CompleteProcMem;
+
+(* Complete proc name after dot by parsing x86/ModName.Obj CmdBlk. *)
+PROCEDURE CompleteProcObj(modname: ARRAY OF CHAR;
+                           VAR buf: ARRAY OF CHAR; VAR len: INTEGER;
+                           dotpos, pfxlen: INTEGER);
+VAR
+  fname: ARRAY 64 OF CHAR;
+  f: Files.File;
+  R: Files.Rider;
+  nofCmds, i, j, matched: INTEGER;
+  n: LONGINT;
+  cname, first: ARRAY 64 OF CHAR;
+BEGIN
+  fname[0]:='x'; fname[1]:='8'; fname[2]:='6'; fname[3]:='/';
+  i := 0; WHILE modname[i] # 0X DO fname[4+i] := modname[i]; INC(i) END;
+  fname[4+i]:='.'; fname[5+i]:='O'; fname[6+i]:='b'; fname[7+i]:='j'; fname[8+i]:=0X;
+  f := Files.Old(fname);
+  IF f = NIL THEN RETURN END;
+  Files.Set(R, f, 0);
+  nofCmds := ObjSeekCmds(R);
+  IF nofCmds < 0 THEN RETURN END;
+  matched := 0;
+  i := 0;
+  WHILE i < nofCmds DO
+    ObjReadStr(R, cname); ObjReadU16(R, n);
+    j := 0;
+    WHILE (j < pfxlen) & (buf[dotpos+1+j] = cname[j]) DO INC(j) END;
+    IF j = pfxlen THEN
+      INC(matched);
+      IF matched = 1 THEN COPY(cname, first) END
+    END;
+    INC(i)
+  END;
+  IF matched = 1 THEN
+    j := pfxlen;
+    WHILE (first[j] # 0X) & (len < LEN(buf) - 1) DO
+      nOut.Char(first[j]); buf[len] := first[j]; INC(len); INC(j)
+    END
+  ELSIF matched > 1 THEN
+    nOut.Char(LF);
+    Files.Set(R, f, 0);  (* rewind for second pass *)
+    nofCmds := ObjSeekCmds(R);
+    IF nofCmds >= 0 THEN
+      i := 0;
+      WHILE i < nofCmds DO
+        ObjReadStr(R, cname); ObjReadU16(R, n);
+        j := 0;
+        WHILE (j < pfxlen) & (buf[dotpos+1+j] = cname[j]) DO INC(j) END;
+        IF j = pfxlen THEN nOut.String(cname); nOut.Char(' ') END;
+        INC(i)
+      END
+    END;
+    ReprintLine(buf, len)
+  END
+END CompleteProcObj;
+
+PROCEDURE TryCompleteProc(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; dotpos: INTEGER);
+VAR
+  modname: Kernel.Name;
+  m: Kernel.Module;
+  i, pfxlen: INTEGER;
+BEGIN
+  i := 0; WHILE i < dotpos DO modname[i] := buf[i]; INC(i) END; modname[i] := 0X;
+  pfxlen := len - dotpos - 1;
+  m := Kernel.modules;
+  WHILE (m # NIL) & (m.name # modname) DO m := m.next END;
+  IF m # NIL THEN
+    CompleteProcMem(m, buf, len, dotpos, pfxlen)
+  ELSE
+    CompleteProcObj(modname, buf, len, dotpos, pfxlen)
+  END
+END TryCompleteProc;
+
+(* ---- module-name completion from x86/*.Obj ------------------------- *)
+
+VAR
+  (* shared state between TryComplete and ObjHandler during one Tab press *)
+  cmpPfx:     ARRAY 64 OF CHAR;
+  cmpPfxLen:  INTEGER;
+  cmpFirst:   ARRAY 64 OF CHAR;
+  cmpMatched: INTEGER;
+  cmpPrint:   BOOLEAN;
+
+PROCEDURE ObjHandler(name: ARRAY OF CHAR; time, date, size: LONGINT;
+                     attr: SET; VAR continue: BOOLEAN);
+VAR modname: ARRAY 64 OF CHAR; i, j: INTEGER;
+BEGIN
+  (* strip .Obj suffix — name must end exactly in ".Obj" *)
+  i := 0; WHILE (name[i] # 0X) & (name[i] # '.') DO INC(i) END;
+  IF (name[i]='.' ) & (name[i+1]='O') & (name[i+2]='b') &
+     (name[i+3]='j') & (name[i+4]=0X) THEN
+    j := 0; WHILE j < i DO modname[j] := name[j]; INC(j) END; modname[j] := 0X;
+    j := 0;
+    WHILE (j < cmpPfxLen) & (cmpPfx[j] = modname[j]) DO INC(j) END;
+    IF j = cmpPfxLen THEN
+      IF cmpPrint THEN nOut.String(modname); nOut.Char(' ')
+      ELSE
+        INC(cmpMatched);
+        IF cmpMatched = 1 THEN COPY(modname, cmpFirst) END
+      END
+    END
+  END
+END ObjHandler;
+
+PROCEDURE TryComplete(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+VAR
+  i, dotpos: INTEGER;
+  res: LONGINT;
+BEGIN
+  dotpos := -1; i := 0;
+  WHILE i < len DO
+    IF buf[i] = '.' THEN dotpos := i END;
+    INC(i)
+  END;
+  IF dotpos >= 0 THEN TryCompleteProc(buf, len, dotpos); RETURN END;
+
+  (* module name: scan x86/*.Obj fresh on every Tab press *)
+  i := 0; WHILE i < len DO cmpPfx[i] := buf[i]; INC(i) END; cmpPfx[i] := 0X;
+  cmpPfxLen := len; cmpMatched := 0; cmpFirst[0] := 0X; cmpPrint := FALSE;
+  FATFiles.Enumerate("x86/*.Obj", ObjHandler, res);
+
+  IF cmpMatched = 1 THEN
+    i := cmpPfxLen;
+    WHILE (cmpFirst[i] # 0X) & (len < LEN(buf) - 2) DO
+      nOut.Char(cmpFirst[i]); buf[len] := cmpFirst[i]; INC(len); INC(i)
     END;
     IF len < LEN(buf) - 1 THEN
       nOut.Char('.'); buf[len] := '.'; INC(len)
     END
-  ELSIF matched > 1 THEN
+  ELSIF cmpMatched > 1 THEN
     nOut.Char(LF);
-    m := Kernel.modules;
-    WHILE m # NIL DO
-      i := 0;
-      WHILE (i < len) & (buf[i] = m.name[i]) DO INC(i) END;
-      IF i = len THEN nOut.String(m.name); nOut.Char(' ') END;
-      m := m.next
-    END;
-    nOut.Char(LF);
-    nOut.String("> ");
-    i := 0; WHILE i < len DO nOut.Char(buf[i]); INC(i) END
+    cmpPrint := TRUE;
+    FATFiles.Enumerate("x86/*.Obj", ObjHandler, res);
+    ReprintLine(buf, len)
   END
 END TryComplete;
 
-(* Read one line character by character (cbreak mode).
-   Sets quit=TRUE on Ctrl+D with empty buffer. *)
+(* ---- cbreak input -------------------------------------------------- *)
+
 PROCEDURE ReadLine(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; VAR quit: BOOLEAN);
 VAR ch: CHAR; ok: BOOLEAN;
 BEGIN
@@ -93,7 +284,8 @@ BEGIN
   buf[len] := 0X
 END ReadLine;
 
-(* Parse and execute one command line: "Module.Proc [params]". *)
+(* ---- command execution --------------------------------------------- *)
+
 PROCEDURE Exec(VAR buf: ARRAY OF CHAR);
 VAR
   cmd, name: ARRAY 64 OF CHAR;
@@ -118,11 +310,8 @@ BEGIN
   IF res # 0 THEN nOut.String("error "); nOut.Int(res, 0); nOut.Ln END
 END Exec;
 
-(* Line-buffered loop: used when stdin is a pipe or for batch input. *)
 PROCEDURE LineLoop;
-VAR
-  line: ARRAY 256 OF CHAR;
-  quit: BOOLEAN;
+VAR line: ARRAY 256 OF CHAR; quit: BOOLEAN;
 BEGIN
   nIn.Open;
   quit := FALSE;
@@ -137,6 +326,8 @@ BEGIN
     END
   END
 END LineLoop;
+
+(* ---- entry point --------------------------------------------------- *)
 
 PROCEDURE Run*;
 VAR
@@ -163,13 +354,12 @@ BEGIN
       nOut.String("  loksh < script            run commands from a file"); nOut.Ln;
       nOut.Ln;
       nOut.String("Interactive keys:"); nOut.Ln;
-      nOut.String("  Tab     complete module name"); nOut.Ln;
+      nOut.String("  Tab     complete module name or procedure name"); nOut.Ln;
       nOut.String("  Ctrl+C  cancel current line"); nOut.Ln;
       nOut.String("  Ctrl+D  exit"); nOut.Ln;
       nOut.String("  quit / exit"); nOut.Ln;
       Kernel.Shutdown(0)
     END;
-    (* single-command mode: loksh Module.Proc [param ...] *)
     nTexts.OpenWriter(W);
     i := 2;
     WHILE i < Kernel.NoOfArgs DO
@@ -187,11 +377,9 @@ BEGIN
   ELSE
     r := nTermios.EnterCbreak(0, saved);
     IF r # 0 THEN
-      (* stdin is not a tty: use line-buffered batch mode *)
       LineLoop;
       Kernel.Shutdown(0)
     END;
-    (* cbreak interactive mode *)
     quit := FALSE;
     WHILE ~quit DO
       nOut.String("> ");
