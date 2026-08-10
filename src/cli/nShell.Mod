@@ -27,6 +27,16 @@ PROCEDURE Erase;
 BEGIN nOut.Char(BS); nOut.Char(' '); nOut.Char(BS)
 END Erase;
 
+PROCEDURE CurLeft(n: INTEGER);
+VAR i: INTEGER;
+BEGIN i := 0; WHILE i < n DO nOut.Char(ESC); nOut.Char('['); nOut.Char('D'); INC(i) END
+END CurLeft;
+
+PROCEDURE CurRight(n: INTEGER);
+VAR i: INTEGER;
+BEGIN i := 0; WHILE i < n DO nOut.Char(ESC); nOut.Char('['); nOut.Char('C'); INC(i) END
+END CurRight;
+
 (* ---- .Obj parsing helpers ----------------------------------------- *)
 
 PROCEDURE ObjReadStr(VAR R: Files.Rider; VAR s: ARRAY OF CHAR);
@@ -83,6 +93,7 @@ VAR i: INTEGER;
 BEGIN
   nOut.Char(LF); nOut.String("> ");
   i := 0; WHILE i < len DO nOut.Char(buf[i]); INC(i) END
+  (* caller must set cur := len after calling *)
 END ReprintLine;
 
 (* Complete proc name after dot from in-memory cmds of a loaded module. *)
@@ -344,16 +355,18 @@ BEGIN
   END
 END AddHist;
 
-PROCEDURE HistReplace(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; VAR src: ARRAY OF CHAR);
+PROCEDURE HistReplace(VAR buf: ARRAY OF CHAR; VAR len, cur: INTEGER; VAR src: ARRAY OF CHAR);
 VAR i: INTEGER;
 BEGIN
+  CurRight(len - cur);  (* move terminal cursor to end before erasing *)
   WHILE len > 0 DO DEC(len); Erase END;
   COPY(src, buf);
   len := 0; WHILE buf[len] # 0X DO INC(len) END;
-  i := 0; WHILE i < len DO nOut.Char(buf[i]); INC(i) END
+  i := 0; WHILE i < len DO nOut.Char(buf[i]); INC(i) END;
+  cur := len
 END HistReplace;
 
-PROCEDURE HistUp(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+PROCEDURE HistUp(VAR buf: ARRAY OF CHAR; VAR len, cur: INTEGER);
 BEGIN
   IF histCount = 0 THEN RETURN END;
   IF histIdx = -1 THEN
@@ -364,55 +377,73 @@ BEGIN
   ELSE
     RETURN
   END;
-  HistReplace(buf, len, hist[histIdx])
+  HistReplace(buf, len, cur, hist[histIdx])
 END HistUp;
 
-PROCEDURE HistDown(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+PROCEDURE HistDown(VAR buf: ARRAY OF CHAR; VAR len, cur: INTEGER);
 BEGIN
   IF histIdx = -1 THEN RETURN END;
   IF histIdx < histCount - 1 THEN
     INC(histIdx);
-    HistReplace(buf, len, hist[histIdx])
+    HistReplace(buf, len, cur, hist[histIdx])
   ELSE
     histIdx := -1;
-    HistReplace(buf, len, histSaved)
+    HistReplace(buf, len, cur, histSaved)
   END
 END HistDown;
 
 (* ---- cbreak input -------------------------------------------------- *)
 
 PROCEDURE ReadLine(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; VAR quit: BOOLEAN);
-VAR ch: CHAR; ok: BOOLEAN;
+VAR ch: CHAR; ok: BOOLEAN; cur, i: INTEGER;
 BEGIN
-  len := 0; quit := FALSE; histIdx := -1;
+  len := 0; cur := 0; quit := FALSE; histIdx := -1;
   LOOP
     ok := nIn.ReadRaw(ch);
     IF ~ok OR (ch = EOT) THEN
       IF len = 0 THEN quit := TRUE END;
       nOut.Char(LF); EXIT
     ELSIF ch = ETX THEN
-      len := 0; nOut.Char(LF); EXIT
+      len := 0; cur := 0; nOut.Char(LF); EXIT
     ELSIF (ch = CR) OR (ch = LF) THEN
       AddHist(buf, len);
       nOut.Char(LF); EXIT
     ELSIF (ch = BS) OR (ch = DEL) THEN
-      IF len > 0 THEN DEC(len); Erase END
+      IF cur > 0 THEN
+        DEC(cur); DEC(len);
+        i := cur; WHILE i < len DO buf[i] := buf[i+1]; INC(i) END;
+        nOut.Char(BS);
+        i := cur; WHILE i < len DO nOut.Char(buf[i]); INC(i) END;
+        nOut.Char(' ');
+        CurLeft(len - cur + 1)
+      END
     ELSIF ch = TAB THEN
       buf[len] := 0X;
-      TryComplete(buf, len)
+      CurRight(len - cur); cur := len;
+      TryComplete(buf, len);
+      cur := len
     ELSIF ch = ESC THEN
       ok := nIn.ReadRaw(ch);
       IF ok & (ch = '[') THEN
         ok := nIn.ReadRaw(ch);
         IF ok THEN
-          IF    ch = 'A' THEN HistUp(buf, len)
-          ELSIF ch = 'B' THEN HistDown(buf, len)
+          IF    ch = 'A' THEN HistUp(buf, len, cur)
+          ELSIF ch = 'B' THEN HistDown(buf, len, cur)
+          ELSIF ch = 'C' THEN IF cur < len THEN CurRight(1); INC(cur) END
+          ELSIF ch = 'D' THEN IF cur > 0  THEN CurLeft(1);  DEC(cur) END
           END
         END
       END
     ELSIF ch >= 20X THEN
       IF len < LEN(buf) - 1 THEN
-        buf[len] := ch; INC(len); nOut.Char(ch)
+        IF cur = len THEN
+          buf[len] := ch; INC(len); INC(cur); nOut.Char(ch)
+        ELSE
+          i := len; WHILE i > cur DO buf[i] := buf[i-1]; DEC(i) END;
+          buf[cur] := ch; INC(len); INC(cur);
+          i := cur - 1; WHILE i < len DO nOut.Char(buf[i]); INC(i) END;
+          CurLeft(len - cur)
+        END
       END
     END
   END;
