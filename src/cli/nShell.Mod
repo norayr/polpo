@@ -460,16 +460,14 @@ VAR
   fname, cname: ARRAY 64 OF CHAR;
   nofCmds, i: INTEGER;
   n: LONGINT;
-  first: BOOLEAN;
 BEGIN
-  first := TRUE;
   m := Kernel.modules;
   WHILE (m # NIL) & (m.name # modname) DO m := m.next END;
   IF m # NIL THEN
+    nOut.String(modname); nOut.String(": no procedure specified."); nOut.Ln;
     i := 0;
     WHILE i < LEN(m.cmds^) DO
-      IF first THEN first := FALSE ELSE nOut.String(", ") END;
-      nOut.String(modname); nOut.Char('.'); nOut.String(m.cmds[i].name);
+      nOut.String("    "); nOut.String(modname); nOut.Char('.'); nOut.String(m.cmds[i].name); nOut.Ln;
       INC(i)
     END
   ELSE
@@ -478,19 +476,18 @@ BEGIN
     fname[4+i]:='.'; fname[5+i]:='O'; fname[6+i]:='b'; fname[7+i]:='j'; fname[8+i]:=0X;
     f := Files.Old(fname);
     IF f # NIL THEN
+      nOut.String(modname); nOut.String(": no procedure specified."); nOut.Ln;
       Files.Set(R, f, 0); nofCmds := ObjSeekCmds(R);
       i := 0;
       WHILE i < nofCmds DO
         ObjReadStr(R, cname); ObjReadU16(R, n);
-        IF first THEN first := FALSE ELSE nOut.String(", ") END;
-        nOut.String(modname); nOut.Char('.'); nOut.String(cname);
+        nOut.String("    "); nOut.String(modname); nOut.Char('.'); nOut.String(cname); nOut.Ln;
         INC(i)
       END
     ELSE
-      nOut.String(modname); nOut.String(": module not found"); nOut.Ln; RETURN
+      nOut.String(modname); nOut.String(": module not found"); nOut.Ln
     END
-  END;
-  nOut.Ln
+  END
 END ShowModCmds;
 
 PROCEDURE Exec(VAR buf: ARRAY OF CHAR);
