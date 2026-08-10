@@ -280,36 +280,72 @@ MODULE nXBrowser;  (** portable, except where noted *)
   END GetModule;
 
   PROCEDURE ShowDef*;
-    VAR S: Texts.Scanner; vname, name: OPS.Name; i: INTEGER;
-      R: Texts.Reader; ch: CHAR;
+    VAR S: Texts.Scanner; vname, name: OPS.Name;
+        fullarg: ARRAY 256 OF CHAR;
+        i, j: INTEGER; R: Texts.Reader; ch: CHAR;
   BEGIN  GetArgs(S); SignOn; show := FALSE; extend := FALSE; hidden := FALSE;
-    IF  S.class=Texts.Name  THEN  QualIdent(S.s, name, vname); Texts.Scan(S);
-      IF (S.class=Texts.Char) & (S.c = Oberon.OptionChar) THEN
+    IF  S.class=Texts.Name  THEN
+      (* Reassemble path from scanner tokens: "src/cli/nOut.Mod" arrives as
+         Name '/' Name '/' Name '.' Name.  Consume until no more '/' follow. *)
+      COPY(S.s, fullarg);
+      i := 0; WHILE fullarg[i] # 0X DO INC(i) END;
+      Texts.Scan(S);
+      WHILE (S.class=Texts.Char) & (S.c='/') DO
+        fullarg[i] := '/'; INC(i);
+        Texts.Scan(S);
+        IF S.class=Texts.Name THEN
+          j := 0;
+          WHILE (S.s[j] # 0X) & (i < LEN(fullarg)-2) DO
+            fullarg[i] := S.s[j]; INC(i); INC(j)
+          END;
+          Texts.Scan(S)
+        END
+      END;
+      fullarg[i] := 0X;
+      (* consume trailing extension (.Mod / .Obj / etc.) if present *)
+      IF (S.class=Texts.Char) & (S.c='.') THEN
+        Texts.Scan(S);
+        IF S.class=Texts.Name THEN Texts.Scan(S) END
+      END;
+      (* derive module name: basename of fullarg (after last '/'), without extension *)
+      j := -1; i := 0;
+      WHILE fullarg[i] # 0X DO IF fullarg[i]='/' THEN j:=i END; INC(i) END;
+      IF j >= 0 THEN
+        i := 0; INC(j);
+        WHILE fullarg[j] # 0X DO name[i]:=fullarg[j]; INC(i); INC(j) END;
+        name[i] := 0X
+      ELSE
+        COPY(fullarg, name)
+      END;
+      (* strip .Mod / .Obj / etc extension *)
+      i := 0; j := -1;
+      WHILE name[i] # 0X DO IF name[i]='.' THEN j:=i END; INC(i) END;
+      IF j > 0 THEN name[j] := 0X END;
+      (* options *)
+      IF (S.class=Texts.Char) & (S.c=Oberon.OptionChar) THEN
         Texts.Scan(S);
         IF (S.class IN {Texts.Name, Texts.String}) THEN
           i := 0; WHILE S.s[i] # 0X DO
-            IF S.s[i] = "d" THEN show := TRUE END;
-            IF S.s[i] = "e" THEN extend := TRUE END;
+            IF S.s[i]="d" THEN show:=TRUE END;
+            IF S.s[i]="e" THEN extend:=TRUE END;
             INC(i)
           END
         END
       END;
       OPM.outputPath:="x86/";
-      (*OPM.OFnative:= 0AFX;*)
       theMod:=GetModule(name);
       IF  theMod#NIL  THEN
         COPY(name, vname); Append(vname, ".Def"); NEW(T); Texts.Open(T, "");
         Str("DEFINITION "); Title; Str(name); Normal; Ch(";"); Ln; Ln; Texts.Append(T, W.buf);
         Scope; Ln; Str("END "); Str(name); Ch("."); Texts.Append(T, W.buf);
-        (* Output to stdout instead of opening window *)
         Texts.OpenReader(R, T, 0);
         WHILE ~R.eot DO
           Texts.Read(R, ch);
-          IF ch = 0DX THEN nOut.Ln ELSE nOut.Char(ch) END
+          IF ch=0DX THEN nOut.Ln ELSE nOut.Char(ch) END
         END;
         nOut.Ln
       END;
-      OPM.outputPath:="";
+      OPM.outputPath:=""
     ELSE
       Str("Browser: module name expected"); Ln; Texts.Append(Oberon.Log, W.buf)
     END

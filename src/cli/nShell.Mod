@@ -197,12 +197,13 @@ END TryCompleteProc;
 (* ---- module-name completion from x86/*.Obj ------------------------- *)
 
 VAR
-  (* shared state between TryComplete and ObjHandler during one Tab press *)
-  cmpPfx:     ARRAY 64 OF CHAR;
-  cmpPfxLen:  INTEGER;
-  cmpFirst:   ARRAY 64 OF CHAR;
-  cmpMatched: INTEGER;
-  cmpPrint:   BOOLEAN;
+  (* shared state for all Tab completion callbacks *)
+  cmpPfx:        ARRAY 64 OF CHAR;
+  cmpPfxLen:     INTEGER;   (* length of name prefix already typed *)
+  cmpFirst:      ARRAY 256 OF CHAR;
+  cmpMatched:    INTEGER;
+  cmpPrint:      BOOLEAN;
+  cmpFirstIsDir: BOOLEAN;   (* used by path completion *)
 
 PROCEDURE ObjHandler(name: ARRAY OF CHAR; time, date, size: LONGINT;
                      attr: SET; VAR continue: BOOLEAN);
@@ -225,15 +226,77 @@ BEGIN
   END
 END ObjHandler;
 
-PROCEDURE TryComplete(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+PROCEDURE PathHandler(name: ARRAY OF CHAR; time, date, size: LONGINT;
+                      attr: SET; VAR continue: BOOLEAN);
+BEGIN
+  IF cmpPrint THEN
+    nOut.String(name);
+    IF FATFiles.SubDir IN attr THEN nOut.Char('/') END;
+    nOut.Char(' ')
+  ELSE
+    INC(cmpMatched);
+    IF cmpMatched = 1 THEN
+      COPY(name, cmpFirst);
+      cmpFirstIsDir := FATFiles.SubDir IN attr
+    END
+  END
+END PathHandler;
+
+(* Complete a Unix path argument starting at buf[argstart..len-1]. *)
+PROCEDURE TryCompletePath(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; argstart: INTEGER);
 VAR
-  i, dotpos: INTEGER;
+  pat: ARRAY 256 OF CHAR;
+  i, j, namepfxstart: INTEGER;
   res: LONGINT;
 BEGIN
-  dotpos := -1; i := 0;
+  (* find start of the final filename component (after last '/') *)
+  namepfxstart := argstart;
+  i := argstart;
   WHILE i < len DO
+    IF buf[i] = '/' THEN namepfxstart := i + 1 END;
+    INC(i)
+  END;
+  cmpPfxLen := len - namepfxstart;  (* chars of filename already typed *)
+
+  (* pattern = everything the user typed + "*" *)
+  i := argstart; j := 0;
+  WHILE i < len DO pat[j] := buf[i]; INC(j); INC(i) END;
+  pat[j] := '*'; pat[j+1] := 0X;
+
+  cmpMatched := 0; cmpFirst[0] := 0X; cmpFirstIsDir := FALSE; cmpPrint := FALSE;
+  FATFiles.Enumerate(pat, PathHandler, res);
+
+  IF cmpMatched = 1 THEN
+    i := cmpPfxLen;
+    WHILE (cmpFirst[i] # 0X) & (len < LEN(buf) - 2) DO
+      nOut.Char(cmpFirst[i]); buf[len] := cmpFirst[i]; INC(len); INC(i)
+    END;
+    IF cmpFirstIsDir & (len < LEN(buf) - 1) THEN
+      nOut.Char('/'); buf[len] := '/'; INC(len)
+    END
+  ELSIF cmpMatched > 1 THEN
+    nOut.Char(LF);
+    cmpPrint := TRUE;
+    FATFiles.Enumerate(pat, PathHandler, res);
+    ReprintLine(buf, len)
+  END
+END TryCompletePath;
+
+PROCEDURE TryComplete(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
+VAR
+  i, dotpos, spacepos: INTEGER;
+  res: LONGINT;
+BEGIN
+  (* first space separates command from arguments *)
+  spacepos := -1; dotpos := -1; i := 0;
+  WHILE i < len DO
+    IF (buf[i] = ' ') & (spacepos = -1) THEN spacepos := i END;
     IF buf[i] = '.' THEN dotpos := i END;
     INC(i)
+  END;
+
+  IF spacepos >= 0 THEN
+    TryCompletePath(buf, len, spacepos + 1); RETURN
   END;
   IF dotpos >= 0 THEN TryCompleteProc(buf, len, dotpos); RETURN END;
 
