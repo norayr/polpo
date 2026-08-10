@@ -452,6 +452,47 @@ END ReadLine;
 
 (* ---- command execution --------------------------------------------- *)
 
+PROCEDURE ShowModCmds(modname: ARRAY OF CHAR);
+VAR
+  m: Kernel.Module;
+  f: Files.File;
+  R: Files.Rider;
+  fname, cname: ARRAY 64 OF CHAR;
+  nofCmds, i: INTEGER;
+  n: LONGINT;
+  first: BOOLEAN;
+BEGIN
+  first := TRUE;
+  m := Kernel.modules;
+  WHILE (m # NIL) & (m.name # modname) DO m := m.next END;
+  IF m # NIL THEN
+    i := 0;
+    WHILE i < LEN(m.cmds^) DO
+      IF first THEN first := FALSE ELSE nOut.String(", ") END;
+      nOut.String(modname); nOut.Char('.'); nOut.String(m.cmds[i].name);
+      INC(i)
+    END
+  ELSE
+    fname[0]:='x'; fname[1]:='8'; fname[2]:='6'; fname[3]:='/';
+    i := 0; WHILE modname[i] # 0X DO fname[4+i] := modname[i]; INC(i) END;
+    fname[4+i]:='.'; fname[5+i]:='O'; fname[6+i]:='b'; fname[7+i]:='j'; fname[8+i]:=0X;
+    f := Files.Old(fname);
+    IF f # NIL THEN
+      Files.Set(R, f, 0); nofCmds := ObjSeekCmds(R);
+      i := 0;
+      WHILE i < nofCmds DO
+        ObjReadStr(R, cname); ObjReadU16(R, n);
+        IF first THEN first := FALSE ELSE nOut.String(", ") END;
+        nOut.String(modname); nOut.Char('.'); nOut.String(cname);
+        INC(i)
+      END
+    ELSE
+      nOut.String(modname); nOut.String(": module not found"); nOut.Ln; RETURN
+    END
+  END;
+  nOut.Ln
+END ShowModCmds;
+
 PROCEDURE Exec(VAR buf: ARRAY OF CHAR);
 VAR
   cmd, name: ARRAY 64 OF CHAR;
@@ -465,6 +506,9 @@ BEGIN
   i := 0;
   WHILE (buf[i] # 0X) & (buf[i] # ' ') DO INC(i) END;
   j := 0; WHILE j < i DO cmd[j] := buf[j]; INC(j) END; cmd[j] := 0X;
+  (* no dot: show exported procedures instead of failing with error 5 *)
+  j := 0; WHILE (cmd[j] # 0X) & (cmd[j] # '.') DO INC(j) END;
+  IF cmd[j] = 0X THEN ShowModCmds(cmd); RETURN END;
   WHILE buf[i] = ' ' DO INC(i) END;
   j := 0; WHILE buf[i] # 0X DO params[j] := buf[i]; INC(j); INC(i) END; params[j] := 0X;
   NEW(par); NEW(par.text); nTexts.Open(par.text, ""); par.pos := 0;
@@ -534,6 +578,8 @@ BEGIN
       IF i < Kernel.NoOfArgs - 1 THEN nTexts.Write(W, " ") END;
       INC(i)
     END;
+    i := 0; WHILE (cmd[i] # 0X) & (cmd[i] # '.') DO INC(i) END;
+    IF cmd[i] = 0X THEN ShowModCmds(cmd); Kernel.Shutdown(0) END;
     NEW(par); NEW(par.text); nTexts.Open(par.text, ""); par.pos := 0;
     nTexts.Append(par.text, W.buf);
     COPY(cmd, name);
