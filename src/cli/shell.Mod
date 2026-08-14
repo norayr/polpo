@@ -153,7 +153,7 @@ BEGIN
   IF f = NIL THEN RETURN END;
   Files.Set(R, f, 0);
   nofCmds := ObjSeekCmds(R);
-  IF nofCmds < 0 THEN RETURN END;
+  IF nofCmds < 0 THEN Files.ReleaseRead(f); RETURN END;
   matched := 0;
   i := 0;
   WHILE i < nofCmds DO
@@ -186,7 +186,8 @@ BEGIN
       END
     END;
     ReprintLine(buf, len)
-  END
+  END;
+  Files.ReleaseRead(f)
 END CompleteProcObj;
 
 PROCEDURE TryCompleteProc(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; dotpos: INTEGER);
@@ -405,21 +406,23 @@ END HistDown;
 PROCEDURE ReadLine(VAR buf: ARRAY OF CHAR; VAR len: INTEGER; VAR quit: BOOLEAN);
 VAR ch: CHAR; ok: BOOLEAN; cur, i: INTEGER;
 BEGIN
-  len := 0; cur := 0; quit := FALSE; histIdx := -1;
+  len := 0; cur := 0; buf[0] := 0X; quit := FALSE; histIdx := -1;
   LOOP
     ok := nIn.ReadRaw(ch);
     IF ~ok OR (ch = EOT) THEN
       IF len = 0 THEN quit := TRUE END;
       nOut.Char(LF); EXIT
     ELSIF ch = ETX THEN
-      len := 0; cur := 0; nOut.Char(LF); EXIT
+      len := 0; cur := 0; buf[0] := 0X; nOut.Char(LF); EXIT
     ELSIF (ch = CR) OR (ch = LF) THEN
+      buf[len] := 0X;
       AddHist(buf, len);
       nOut.Char(LF); EXIT
     ELSIF (ch = BS) OR (ch = DEL) THEN
       IF cur > 0 THEN
         DEC(cur); DEC(len);
         i := cur; WHILE i < len DO buf[i] := buf[i+1]; INC(i) END;
+        buf[len] := 0X;
         nOut.Char(BS);
         i := cur; WHILE i < len DO nOut.Char(buf[i]); INC(i) END;
         nOut.Char(' ');
@@ -429,6 +432,7 @@ BEGIN
       buf[len] := 0X;
       CurRight(len - cur); cur := len;
       TryComplete(buf, len);
+      buf[len] := 0X;
       cur := len
     ELSIF ch = ESC THEN
       ok := nIn.ReadRaw(ch);
@@ -451,7 +455,8 @@ BEGIN
           buf[cur] := ch; INC(len); INC(cur);
           i := cur - 1; WHILE i < len DO nOut.Char(buf[i]); INC(i) END;
           CurLeft(len - cur)
-        END
+        END;
+        buf[len] := 0X
       END
     END
   END;
@@ -491,7 +496,8 @@ BEGIN
         ObjReadStr(R, cname); ObjReadU16(R, n);
         nOut.String("    "); nOut.String(modname); nOut.Char('.'); nOut.String(cname); nOut.Ln;
         INC(i)
-      END
+      END;
+      Files.ReleaseRead(f)
     ELSE
       nOut.String(modname); nOut.String(": module not found"); nOut.Ln
     END

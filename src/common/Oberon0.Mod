@@ -54,7 +54,9 @@ VAR i, j: INTEGER; done, eos: BOOLEAN; part: ARRAY 32 OF CHAR;
   f: Files.File; t, d: LONGINT;
 BEGIN
   f := Files.Old(OberonText);
-  IF f = NIL THEN t := 0; d := 0 ELSE Files.GetDate(f, t, d) END;
+  IF f = NIL THEN t := 0; d := 0
+  ELSE Files.GetDate(f, t, d); Files.ReleaseRead(f)
+  END;
   IF (t # conftime) OR (d # confdate) THEN
     conftime := t; confdate := d; Texts.Open(conftext, OberonText)
   END;

@@ -354,6 +354,9 @@ MODULE browser;  (** portable, except where noted *)
 PROCEDURE ShowScope*;  (** non-portable *)
   VAR vname: ARRAY 32 OF CHAR; R: Texts.Reader; ch: CHAR;
   BEGIN
+    IF OPT.topScope = NIL THEN
+      out.String("Browser: no current compiler scope"); out.Ln; RETURN
+    END;
     show := TRUE; extend := TRUE;  hidden := TRUE; vname := "CURRENT";
     theMod := OPT.topScope.right;
     Append(vname, ".Def"); NEW(T); Texts.Open(T, "");

@@ -91,12 +91,14 @@ BEGIN
 END MatchLine;
 
 PROCEDURE SearchFile(name: ARRAY OF CHAR);
-VAR T: Texts.Text; R: Texts.Reader; line: ARRAY MaxLine OF CHAR;
+VAR f: Files.File; T: Texts.Text; R: Texts.Reader; line: ARRAY MaxLine OF CHAR;
   ch: CHAR; i: INTEGER; lineNo: LONGINT; fileMatched, overflow, overflowed: BOOLEAN;
 BEGIN
-  IF Files.Old(name) = NIL THEN
+  f := Files.Old(name);
+  IF f = NIL THEN
     Out.String("grep: cannot open "); Out.String(name); Out.Ln; RETURN
   END;
+  Files.ReleaseRead(f);
   NEW(T); Texts.Open(T, name); Texts.OpenReader(R, T, 0); Texts.Read(R, ch);
   i := 0; lineNo := 1; fileMatched := FALSE; overflow := FALSE; overflowed := FALSE;
   WHILE ~R.eot DO

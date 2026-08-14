@@ -422,7 +422,8 @@ TYPE
       IF ch = DocBlockId THEN ReadDocHeader(R, ch) END;
       IF (ch = TextBlockId) OR (ch = OldTextBlockId) THEN Load(T, f, Files.Pos(R), len)
         ELSE LoadAscii(T, f)
-      END
+      END;
+      Files.ReleaseRead(f)
     ELSE GenNew(T)
     END
   END Open;

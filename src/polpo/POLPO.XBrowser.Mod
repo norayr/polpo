@@ -311,6 +311,9 @@ MODULE XBrowser;  (** portable, except where noted *)
   PROCEDURE ShowScope*;  (** non-portable *)
   VAR vname: ARRAY 32 OF CHAR;
   BEGIN
+    IF OPT.topScope = NIL THEN
+      Str("Browser: no current compiler scope"); Ln; Texts.Append(Oberon.Log, W.buf); RETURN
+    END;
     show := TRUE; extend := TRUE;  hidden := TRUE; vname := "CURRENT";
     theMod := OPT.topScope.right;
     Append(vname, ".Def"); NEW(T); Texts.Open(T, "");

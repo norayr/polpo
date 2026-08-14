@@ -257,10 +257,12 @@ BEGIN
 END GrepLine;
 
 PROCEDURE GrepFile(name: ARRAY OF CHAR);
-VAR T: Texts.Text; R: Texts.Reader; text: ARRAY MaxLine OF CHAR;
+VAR f: Files.File; T: Texts.Text; R: Texts.Reader; text: ARRAY MaxLine OF CHAR;
   ch: CHAR; i: INTEGER; lineNo: LONGINT; overflow, overflowed: BOOLEAN;
 BEGIN
-  IF Files.Old(name) = NIL THEN Out.String("rx: cannot open "); Out.String(name); Out.Ln; RETURN END;
+  f := Files.Old(name);
+  IF f = NIL THEN Out.String("rx: cannot open "); Out.String(name); Out.Ln; RETURN END;
+  Files.ReleaseRead(f);
   NEW(T); Texts.Open(T, name); Texts.OpenReader(R, T, 0); Texts.Read(R, ch);
   i := 0; lineNo := 1; overflow := FALSE; overflowed := FALSE;
   WHILE ~R.eot DO

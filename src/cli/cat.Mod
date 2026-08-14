@@ -52,6 +52,7 @@ END IsCharacterLibrary;
 
 PROCEDURE CatFile(path: ARRAY OF CHAR; plain: BOOLEAN);
 VAR
+  f: Files.File;
   T: Texts.Text;
   R: Texts.Reader;
   ch: CHAR;
@@ -59,10 +60,12 @@ VAR
   bold, italic, curBold, curItalic: BOOLEAN;
   col, curCol: SHORTINT;
 BEGIN
-  IF Files.Old(path) = NIL THEN
+  f := Files.Old(path);
+  IF f = NIL THEN
     out.String("cat: cannot open "); out.String(path); out.Ln;
     RETURN
   END;
+  Files.ReleaseRead(f);
   NEW(T); Texts.Open(T, path);
   Texts.OpenReader(R, T, 0); Texts.Read(R, ch);
   curBold := FALSE; curItalic := FALSE; curCol := 15;
