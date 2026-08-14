@@ -1065,7 +1065,7 @@ MODULE OPT;  (* non-portable *)
             IF (last.mode = Typ) & (last.typ.form = Comp) & (last.typ.comp = Record) THEN SetTypFlags(last.typ) END;
             last := last.nxtobj
           END;
-          Files.Close(Files.Base(R));
+          Files.ReleaseRead(Files.Base(R));
         END;
       ELSE
         IF impSelf THEN newSF:=TRUE; extSF:=TRUE; sfpresent:=FALSE

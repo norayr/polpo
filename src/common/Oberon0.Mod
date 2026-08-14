@@ -123,7 +123,7 @@ BEGIN
 END Call;
 
 PROCEDURE GetSelection*(VAR text: Texts.Text; VAR beg, end, time: LONGINT);
-BEGIN text := NIL; beg := 0; end := 0; time := 0 END GetSelection;
+BEGIN text := NIL; beg := 0; end := 0; time := -1 END GetSelection;
 
 BEGIN
   NEW(Par); NEW(Par.text); Par.pos := 0; Texts.Open(Par.text, "");

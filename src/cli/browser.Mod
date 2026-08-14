@@ -257,7 +257,7 @@ MODULE browser;  (** portable, except where noted *)
       IF  found  THEN  Files.Read(R, ch0); Files.Read(R, ch1);
         found := (ch0=0BBX) & (ch1=OPM.OFnative)
       END;
-      Files.Close(F);
+      Files.ReleaseRead(F);
 
       IF F = NIL THEN
         Str(iname); Str(" does not exist"); Ln; Texts.Append(Oberon.Log, W.buf)
@@ -347,7 +347,7 @@ MODULE browser;  (** portable, except where noted *)
       END;
       OPM.outputPath:=""
     ELSE
-      Str("Browser: module name expected"); Ln; Texts.Append(Oberon.Log, W.buf)
+      out.String("Browser: module name expected"); out.Ln
     END
   END ShowDef;
 
