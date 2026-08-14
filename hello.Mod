@@ -1,9 +1,9 @@
 MODULE hello;
-IMPORT nOut;
+IMPORT out;
 
 PROCEDURE world*;
 BEGIN
-  nOut.String("hey hey!"); nOut.Ln;
+  out.String("hey hey!"); out.Ln;
 END world;
 
 END hello.
