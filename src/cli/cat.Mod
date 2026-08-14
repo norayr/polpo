@@ -4,7 +4,7 @@ MODULE cat;
     Default: renders font attributes (bold, italic) and color via VT100 escapes.
     -p / -plain: plain text output only, like ocat. *)
 
-IMPORT Files, Texts := texts, Oberon := Oberon0, out;
+IMPORT Files, Objects, Texts := texts, Oberon := Oberon0, out;
 
 CONST
   ESC = 1BX;
@@ -41,6 +41,15 @@ BEGIN
   END
 END EmitColor;
 
+PROCEDURE IsCharacterLibrary(lib: Objects.Library): BOOLEAN;
+VAR i: INTEGER;
+BEGIN
+  IF lib = NIL THEN RETURN TRUE END;
+  i := 0; WHILE lib.name[i] # 0X DO INC(i) END;
+  RETURN (i >= 4) & (lib.name[i-4] = ".") & (lib.name[i-3] = "F")
+    & (lib.name[i-2] = "n") & (lib.name[i-1] = "t")
+END IsCharacterLibrary;
+
 PROCEDURE CatFile(path: ARRAY OF CHAR; plain: BOOLEAN);
 VAR
   T: Texts.Text;
@@ -69,10 +78,12 @@ BEGIN
         IF col # 15    THEN EmitColor(col); curCol    := col   END
       END
     END;
-    IF    ch >= ' '  THEN out.Char(ch)
-    ELSIF ch = 09X   THEN out.Char(ch)   (* TAB preserved *)
-    ELSIF ch = 0DX   THEN out.Ln         (* CR -> LF *)
-    (* ElemChar 1CX and other controls skipped *)
+    IF IsCharacterLibrary(R.lib) THEN
+      IF    ch >= ' '  THEN out.Char(ch)
+      ELSIF ch = 09X   THEN out.Char(ch)   (* TAB preserved *)
+      ELSIF ch = 0DX   THEN out.Ln         (* CR -> LF *)
+      (* ElemChar 1CX and other controls skipped *)
+      END
     END;
     Texts.Read(R, ch)
   END;

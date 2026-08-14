@@ -683,7 +683,7 @@ TYPE
   R.stamp := T.stamp; R.bufpos := 0; R.buflen := 0;
     R.ref := p; R.org := org; R.off := pos - org;
   R.lib := p.lib; R.col := p.col; R.voff := p.voff;
-    IF p.ref >= 0 THEN SyncPiece(T, p) END;
+    IF (p.ref >= 0) & (Update # NIL) THEN SyncPiece(T, p) END;
     Files.Set(R.R, p.f, p.off + R.off); R.eot := p.f = Wfile
   END OpenReader;
   
@@ -698,7 +698,7 @@ information about the last character read. *)
       IF R.buflen <= 0 THEN
         R.org := R.org + ref.len; R.off := 0; ref := ref.next; R.ref := ref;
         R.lib := ref.lib; R.col := ref.col; R.voff := ref.voff;
-        IF ref.ref >= 0 THEN SyncPiece(R.T, ref) END;
+        IF (ref.ref >= 0) & (Update # NIL) THEN SyncPiece(R.T, ref) END;
         Files.Set(R.R, ref.f, ref.off);
         R.buflen := ref.len; IF ref.f = Wfile THEN R.eot := TRUE END
       END;
