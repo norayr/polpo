@@ -18,7 +18,7 @@ xterm -name polpo  -ti vt340 -tn vt340 -geometry 200x70 \
   -xrm 'XTerm*maxGraphicSize: 3000x2000' \
   -xrm 'XTerm*sixelScrolling: true' \
   -xrm 'XTerm*sixelScrollsRight: true' \
-  -fa 'monospace' -fs 10 -e ./xoberon
+  -fa 'monospace' -fs 10 -e ./loksh System.Init
 
 # in xterm
 #OWIDTH=1500 OHEIGHT=1000 ./xoberon

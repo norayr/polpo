@@ -1,80 +1,73 @@
 # common files for ui and cli oberon
-nXCompiler.Compile src/polpo/POLPO.X86.Linux0.Mod
-nXCompiler.Compile src/polpo/POLPO.X86.Kernel.Mod
-nXCompiler.Compile src/ARM.Reals.Mod
-nXCompiler.Compile src/polpo/POLPO.X86.Files.Mod
+compiler.Compile src/polpo/POLPO.X86.Linux0.Mod
+compiler.Compile src/polpo/POLPO.X86.Kernel.Mod
+compiler.Compile src/ARM.Reals.Mod
+compiler.Compile src/polpo/POLPO.Files.Mod
 
 # for cli
-nXCompiler.Compile src/cli/nOut.Mod
-nXCompiler.Compile src/cli/nModules.Mod
-nXCompiler.Compile src/cli/ooc2Strings.Mod
-nXCompiler.Compile src/cli/nTexts.Mod
-nXCompiler.Compile src/cli/nOberon.Mod
-nXCompiler.Compile src/cli/nIn.Mod
-nXCompiler.Compile src/cli/nTermios.Mod
-nXCompiler.Compile src/cli/nShell.Mod
-nXCompiler.Compile src/cli/nCat.Mod
-nXCompiler.Compile src/polpo/POLPO.FATFiles.Mod
+compiler.Compile /s src/cli/out.Mod
+compiler.Compile /s src/common/Modules0.Mod
+compiler.Compile /s src/common/Modules.Mod
+compiler.Compile /s src/polpo/POLPO.Objects.Mod
+compiler.Compile /s src/cli/strings.Mod
+compiler.Compile /s src/common/Texts0.Mod
+compiler.Compile /s src/cli/texts.Mod
+compiler.Compile /s src/common/Oberon0.Mod
+compiler.Compile /s src/cli/oberon.Mod
+compiler.Compile /s src/cli/in.Mod
+compiler.Compile /s src/cli/termios.Mod
+compiler.Compile /s src/cli/system.Mod
+compiler.Compile /s src/polpo/POLPO.FATFiles.Mod
+compiler.Compile /s src/cli/shell.Mod
+compiler.Compile /s src/cli/loksh.Mod
+compiler.Compile /s src/cli/cat.Mod
 
 # cli compiler
-nXCompiler.Compile src/cli/nOPM.Mod
-nXCompiler.Compile src/cli/nOPS.Mod
-nXCompiler.Compile src/cli/nOPT.Mod
-nXCompiler.Compile src/cli/nOPB.Mod
-nXCompiler.Compile src/cli/nOPA.Mod
-nXCompiler.Compile src/cli/nOPP.Mod
-nXCompiler.Compile src/cli/nOPO.Mod
-nXCompiler.Compile src/cli/nOPL.Mod
-nXCompiler.Compile src/cli/nOPC.Mod
-nXCompiler.Compile src/cli/nOPV.Mod
-nXCompiler.Compile src/cli/nXCompiler.Mod
-nXCompiler.Compile src/cli/nXBootLinker.Mod
+compiler.Compile /s src/OPM.Mod
+compiler.Compile /s src/OPS.Mod
+compiler.Compile /s src/OPT.Mod
+compiler.Compile /s src/OPB.Mod
+compiler.Compile /s src/OPA.Mod
+compiler.Compile /s src/OPP.Mod
+compiler.Compile /s src/OPO.Mod
+compiler.Compile /s src/OPL.Mod
+compiler.Compile /s src/OPC.Mod
+compiler.Compile /s src/OPV.Mod
+compiler.Compile /s src/cli/compiler.Mod
+compiler.Compile /s src/cli/linker.Mod
+compiler.Compile /s src/cli/browser.Mod
 
-nXBootLinker.Link loksh2 /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/nOut x86/nModules ~
+linker.Link loksh2 /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/Modules0 x86/loksh ~
 
 # ui oberon
-nXCompiler.Compile src/polpo/POLPO.X86.Modules.Mod
-nXCompiler.Compile src/polpo/POLPO.FileDir.Mod
-nXCompiler.Compile /x src/polpo/POLPO.Objects.Mod
-nXCompiler.Compile /x src/polpo/POLPO.Display.Mod
-nXCompiler.Compile src/polpo/POLPO.Input.Mod
-nXCompiler.Compile src/polpo/POLPO.Fonts.Mod
-nXCompiler.Compile src/polpo/POLPO.Texts.Mod
-nXCompiler.Compile src/Viewers.Mod
-nXCompiler.Compile src/Oberon.Mod
-nXCompiler.Compile src/polpo/POLPO.In.Mod
-nXCompiler.Compile src/MenuViewers.Mod
-nXCompiler.Compile src/polpo/POLPO.TextFrames.Mod
-nXCompiler.Compile src/polpo/POLPO.System.Mod
-nXCompiler.Compile src/polpo/POLPO.Bitmaps.Mod
-nXCompiler.Compile src/Out.Mod
-nXCompiler.Compile src/Pictures.Mod
-nXCompiler.Compile src/polpo/POLPO.Centronics.Mod
-nXCompiler.Compile src/polpo/POLPO.V24.Mod
-nXCompiler.Compile src/Printer.Mod
-nXCompiler.Compile src/Edit.Mod
-nXCompiler.Compile src/Styles.Mod
-nXCompiler.Compile src/ScriptFrames.Mod
-nXCompiler.Compile src/Script.Mod
-nXCompiler.Compile src/polpo/POLPO.Compiler.Mod
-nXCompiler.Compile src/polpo/POLPO.FileTools.Mod
+compiler.Compile src/polpo/POLPO.FileDir.Mod
+compiler.Compile /x src/polpo/POLPO.Display.Mod
+compiler.Compile src/polpo/POLPO.Input.Mod
+compiler.Compile src/polpo/POLPO.Fonts.Mod
+compiler.Compile src/polpo/POLPO.Texts.Mod
+compiler.Compile src/Viewers.Mod
+compiler.Compile src/Oberon.Mod
+compiler.Compile src/polpo/POLPO.In.Mod
+compiler.Compile src/MenuViewers.Mod
+compiler.Compile src/polpo/POLPO.TextFrames.Mod
+compiler.Compile src/polpo/POLPO.System.Mod
+compiler.Compile src/polpo/POLPO.Bitmaps.Mod
+compiler.Compile src/Out.Mod
+compiler.Compile src/Pictures.Mod
+compiler.Compile src/polpo/POLPO.Centronics.Mod
+compiler.Compile src/polpo/POLPO.V24.Mod
+compiler.Compile src/Printer.Mod
 
-# ui compiler
-nXCompiler.Compile src/polpo/POLPO.OPM.Mod
-nXCompiler.Compile src/polpo/POLPO.OPS.Mod
-nXCompiler.Compile src/polpo/POLPO.OPT.Mod
-nXCompiler.Compile src/polpo/POLPO.OPB.Mod
-nXCompiler.Compile src/OPA.Mod
-nXCompiler.Compile src/polpo/POLPO.OPP.Mod
-nXCompiler.Compile src/polpo/POLPO.OPO.Mod
-nXCompiler.Compile src/polpo/POLPO.OPL.Mod
-nXCompiler.Compile src/polpo/POLPO.OPC.Mod
-nXCompiler.Compile src/polpo/POLPO.OPV.Mod
-nXCompiler.Compile src/polpo/POLPO.XCompiler.Mod
-nXCompiler.Compile src/polpo/POLPO.XBootLinker.Mod
-nXCompiler.Compile src/Dates.Mod
-nXCompiler.Compile src/Strings.Mod
-nXCompiler.Compile src/polpo/POLPO.XDecoder.Mod
-nXCompiler.Compile src/polpo/POLPO.XBrowser.Mod
-
-nXBootLinker.Link xoberon /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/Modules ~
+# ui clients
+compiler.Compile src/Edit.Mod
+compiler.Compile src/Styles.Mod
+compiler.Compile src/ScriptFrames.Mod
+compiler.Compile src/Script.Mod
+compiler.Compile src/Dates.Mod
+compiler.Compile src/Strings.Mod
+compiler.Compile src/polpo/POLPO.Compiler.Mod
+compiler.Compile src/polpo/POLPO.FileTools.Mod
+compiler.Compile src/polpo/POLPO.XCompiler.Mod
+compiler.Compile src/polpo/POLPO.XBootLinker.Mod
+compiler.Compile src/polpo/POLPO.XDecoder.Mod
+compiler.Compile src/polpo/POLPO.XBrowser.Mod
