@@ -189,7 +189,7 @@ TYPE  TimeVal= RECORD tvsec, tvusec: LONGINT END;
 VAR num: LONGINT; timeout: TimeVal;
 BEGIN
   timeout.tvsec:=0; timeout.tvusec:= usec;    (* don't block at all *)
-  num:= Linux0.Select0( 16, SYSTEM.ADR( fd), 0, 0, SYSTEM.ADR( timeout));
+  num:= Linux0.Select0(32, SYSTEM.ADR(fd), 0, 0, SYSTEM.ADR(timeout));
   RETURN num>0;
 END Avail;
 

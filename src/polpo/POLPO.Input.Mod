@@ -164,12 +164,21 @@ BEGIN
   res:=Linux0.Write0(STDERR, SYSTEM.ADR(str), len+1);
 END WriteErr;
 
+PROCEDURE RequireSelectable(fd: LONGINT);
+BEGIN
+  IF (fd < 0) OR (fd >= 32) THEN
+    WriteErr("Input: file descriptor outside select range 0..31");
+    WriteSH("Input file descriptor: ", fd);
+    Kernel.Shutdown(1)
+  END
+END RequireSelectable;
+
 PROCEDURE Avail( fd: SET; usec: LONGINT): BOOLEAN;
 TYPE  TimeVal= RECORD tvsec, tvusec: LONGINT END;
 VAR num: LONGINT; timeout: TimeVal;
 BEGIN
   timeout.tvsec:=0; timeout.tvusec:= usec;    (* don't block at all *)
-  num:= Linux0.Select0( 16, SYSTEM.ADR( fd), 0, 0, SYSTEM.ADR( timeout));
+  num:= Linux0.Select0(32, SYSTEM.ADR(fd), 0, 0, SYSTEM.ADR(timeout));
   RETURN num>0;
 END Avail;
 
@@ -258,13 +267,13 @@ IF Avail( {kbdfd}, 0) THEN  ReadChar( ch);
     END;
   ELSIF (ch=0C3X) & Avail( {kbdfd}, 0) THEN
     ReadChar( ch);
-    IF ch=0A4X THEN ch:="É";    (* german keyboard *)
-    ELSIF ch=0B6X THEN ch:="Ñ";
-    ELSIF ch=0BCX THEN ch:="Ö";
-    ELSIF ch=084X THEN ch:= "Ä"; (* CAP("É");*)
-    ELSIF ch=096X THEN ch:= "Å"; (* CAP("Ñ");*)
-    ELSIF ch=09CX THEN ch:= "Ç"; (* CAP("Ö");*)
-    ELSIF ch=09FX THEN ch:= "ñ"; (* sz *)
+    IF ch=0A4X THEN ch:=83X;    (* german keyboard: a umlaut *)
+    ELSIF ch=0B6X THEN ch:=84X;
+    ELSIF ch=0BCX THEN ch:=85X;
+    ELSIF ch=084X THEN ch:=80X; (* capital a umlaut *)
+    ELSIF ch=096X THEN ch:=81X; (* capital o umlaut *)
+    ELSIF ch=09CX THEN ch:=82X; (* capital u umlaut *)
+    ELSIF ch=09FX THEN ch:=96X; (* sharp s *)
     END;
   ELSIF ch=0AX THEN ch:= 0DX;
   END;
@@ -481,7 +490,7 @@ BEGIN
           IF sym=098H THEN c:=0C3X;  (* -> *)END;
 
         ELSE
-          IF c=0DFX THEN c:= 96X END;    (*  ñ  *)
+          IF c=0DFX THEN c:= 96X END;    (* sharp s *)
           IF c=0E1X THEN c:= 94X END;    (*  aacute  *)
           IF c=0E7X THEN c:= 93X END;    (*  ccedilla  *)
           IF c=0EFX THEN c:= 92X END;    (*  idiaeresis  *)
@@ -497,12 +506,12 @@ BEGIN
           IF c=0EEX THEN c:= 88X END;    (*  icircimflex  *)
           IF c=0EAX THEN c:= 87X END;    (*  ecircumflex  *)
           IF c=0E2X THEN c:= 86X END;    (*  acircumflex  *)
-          IF c= 0FCX THEN c:= 85X END;    (*  Ö; must be 0xyz if c is  unsigned *)
-          IF c= 0F6X THEN c:= 84X END;    (*  Ñ  *)
-          IF c= 0E4X THEN c:= 83X END;    (*  É  *)
-          IF c= 0DCX THEN c:= 82X END;    (*  Ç  *)
-          IF c= 0D6X THEN c:= 81X END;    (*  Å  *)
-          IF c= 0C4X THEN c:= 80X END;    (*  Ä  *)
+          IF c= 0FCX THEN c:= 85X END;    (* u umlaut; must be 0xyz if c is unsigned *)
+          IF c= 0F6X THEN c:= 84X END;    (* o umlaut *)
+          IF c= 0E4X THEN c:= 83X END;    (* a umlaut *)
+          IF c= 0DCX THEN c:= 82X END;    (* capital u umlaut *)
+          IF c= 0D6X THEN c:= 81X END;    (* capital o umlaut *)
+          IF c= 0C4X THEN c:= 80X END;    (* capital a umlaut *)
         END;
 
         IF sym=0AFEH THEN Paste;  (* ctrl-v *)
@@ -782,12 +791,14 @@ BEGIN
   IF x11 THEN
     myProperty:=-1;
     dfd:=Display.InitX11();
+    RequireSelectable(dfd);
     fdset:={dfd};
     myProperty:=InternAtom();
   ELSE
     dfd:=Display.InitFB();
     InitMouseFB;
     InitKbdFB;
+    RequireSelectable(kbdfd); RequireSelectable(mfd);
     fdset:={kbdfd, mfd};
     Kernel.InstallTermHandler( CloseFB);
   END;

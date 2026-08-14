@@ -190,6 +190,10 @@ MODULE OPT;  (* non-portable *)
     nofmod:=0; nofemod:=0;
   END Close;
 
+  PROCEDURE ScopeActive*(): BOOLEAN;
+  BEGIN RETURN (topScope # NIL) & (topScope # universe)
+  END ScopeActive;
+
   PROCEDURE NewMod(): Module;
     VAR M: Module;
   BEGIN
