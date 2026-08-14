@@ -53,6 +53,9 @@ BEGIN
   IF R.lib = NIL THEN name[0] := 0X ELSE COPY(R.lib.name, name) END
 END FontName;
 
+PROCEDURE IsCharacterLibrary*(lib: Objects.Library): BOOLEAN;
+BEGIN RETURN Texts0.IsCharacterLibrary(lib) END IsCharacterLibrary;
+
 PROCEDURE OpenScanner*(VAR S: Scanner; T: Text; pos: LONGINT);
 BEGIN Texts0.OpenScanner(S, T, pos) END OpenScanner;
 

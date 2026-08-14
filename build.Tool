@@ -11,7 +11,9 @@ compiler.Compile /s src/common/Modules.Mod
 compiler.Compile /s src/common/Objects0.Mod
 compiler.Compile /s src/cli/objects.Mod
 compiler.Compile /s src/cli/strings.Mod
+compiler.Compile /s src/common/regex.Mod
 compiler.Compile /s src/common/Texts0.Mod
+compiler.Compile /s src/common/RXA.Mod
 compiler.Compile /s src/cli/texts.Mod
 compiler.Compile /s src/common/Oberon0.Mod
 compiler.Compile /s src/cli/oberon.Mod
@@ -22,6 +24,8 @@ compiler.Compile /s src/polpo/POLPO.FATFiles.Mod
 compiler.Compile /s src/cli/shell.Mod
 compiler.Compile /s src/cli/loksh.Mod
 compiler.Compile /s src/cli/cat.Mod
+compiler.Compile /s src/cli/grep.Mod
+compiler.Compile /s src/cli/rx.Mod
 
 # cli compiler
 compiler.Compile /s src/OPM.Mod
