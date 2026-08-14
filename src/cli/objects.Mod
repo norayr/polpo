@@ -1,6 +1,6 @@
-MODULE Objects;  (** UI object facade *)
+MODULE objects;  (** console object facade *)
 
-IMPORT Files, Modules, Objects0;
+IMPORT Files, Objects0;
 
 CONST
   enum* = Objects0.enum; get* = Objects0.get; set* = Objects0.set;
@@ -33,9 +33,7 @@ TYPE
   NewProc* = Objects0.NewProc;
   EnumProc* = Objects0.EnumProc;
 
-VAR
-  LibBlockId*: CHAR;
-  NewObj*: Object;
+VAR LibBlockId*: CHAR; NewObj*: Object;
 
 PROCEDURE Stamp*(VAR M: ObjMsg);
 BEGIN Objects0.Stamp(M) END Stamp;
@@ -73,30 +71,7 @@ BEGIN Objects0.GetName(D, key, name) END GetName;
 PROCEDURE PutName*(VAR D: Dictionary; key: INTEGER; name: ARRAY OF CHAR);
 BEGIN Objects0.PutName(D, key, name) END PutName;
 
-PROCEDURE SplitName(name: ARRAY OF CHAR; VAR MName, PName: ARRAY OF CHAR);
-VAR i, j: INTEGER;
-BEGIN
-  i := 0;
-  WHILE name[i] # "." DO MName[i] := name[i]; INC(i) END;
-  MName[i] := 0X; INC(i); j := 0;
-  WHILE name[i] # 0X DO PName[j] := name[i]; INC(i); INC(j) END;
-  PName[j] := 0X
-END SplitName;
-
-PROCEDURE Activate(name: ARRAY OF CHAR; VAR obj: Object);
-VAR MName, PName: Name; Mod: Modules.Module; Cmd: Modules.Command;
-BEGIN
-  NewObj := NIL;
-  SplitName(name, MName, PName);
-  Mod := Modules.ThisMod(MName);
-  IF Modules.res = 0 THEN
-    Cmd := Modules.ThisCommand(Mod, PName);
-    IF Modules.res = 0 THEN Cmd END
-  END;
-  obj := NewObj
-END Activate;
-
 BEGIN
   LibBlockId := Objects0.LibBlockId;
-  Objects0.Activate := Activate
-END Objects.
+  Objects0.Activate := NIL
+END objects.

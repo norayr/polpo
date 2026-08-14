@@ -8,7 +8,8 @@ compiler.Compile src/polpo/POLPO.Files.Mod
 compiler.Compile /s src/cli/out.Mod
 compiler.Compile /s src/common/Modules0.Mod
 compiler.Compile /s src/common/Modules.Mod
-compiler.Compile /s src/polpo/POLPO.Objects.Mod
+compiler.Compile /s src/common/Objects0.Mod
+compiler.Compile /s src/cli/objects.Mod
 compiler.Compile /s src/cli/strings.Mod
 compiler.Compile /s src/common/Texts0.Mod
 compiler.Compile /s src/cli/texts.Mod
@@ -40,6 +41,7 @@ compiler.Compile /s src/cli/browser.Mod
 linker.Link loksh2 /refs /integrate 8049000H x86/Linux0 x86/Kernel x86/Files x86/Modules0 x86/loksh ~
 
 # ui oberon
+compiler.Compile /s src/polpo/POLPO.Objects.Mod
 compiler.Compile src/polpo/POLPO.FileDir.Mod
 compiler.Compile /x src/polpo/POLPO.Display.Mod
 compiler.Compile src/polpo/POLPO.Input.Mod

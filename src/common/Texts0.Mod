@@ -16,7 +16,7 @@ MODULE Texts0; (** portable rich text core *)
 characters and objects, with different colors, different fonts, and vertical offsets.
 *)
 
-  IMPORT Files, Objects, Reals;
+  IMPORT Files, Objects := Objects0, Reals;
 
   CONST
     (** Scanner symbol classes.*)

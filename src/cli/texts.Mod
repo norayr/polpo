@@ -1,6 +1,6 @@
 MODULE texts;
 
-IMPORT Files, Objects, Texts0;
+IMPORT Files, Objects := objects, Texts0;
 
 CONST
   Inval* = Texts0.Inval; Name* = Texts0.Name; String* = Texts0.String;

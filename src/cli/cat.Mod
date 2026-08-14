@@ -4,7 +4,7 @@ MODULE cat;
     Default: renders font attributes (bold, italic) and color via VT100 escapes.
     -p / -plain: plain text output only, like ocat. *)
 
-IMPORT Files, Objects, Texts := texts, Oberon := Oberon0, out;
+IMPORT Files, Objects := objects, Texts := texts, Oberon := Oberon0, out;
 
 CONST
   ESC = 1BX;
