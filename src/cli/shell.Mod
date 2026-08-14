@@ -240,16 +240,21 @@ END ObjHandler;
 
 PROCEDURE PathHandler(name: ARRAY OF CHAR; time, date, size: LONGINT;
                       attr: SET; VAR continue: BOOLEAN);
+VAR i: INTEGER;
 BEGIN
-  IF cmpPrint THEN
-    nOut.String(name);
-    IF FATFiles.SubDir IN attr THEN nOut.Char('/') END;
-    nOut.Char(' ')
-  ELSE
-    INC(cmpMatched);
-    IF cmpMatched = 1 THEN
-      COPY(name, cmpFirst);
-      cmpFirstIsDir := FATFiles.SubDir IN attr
+  i := 0;
+  WHILE (i < cmpPfxLen) & (cmpPfx[i] = name[i]) DO INC(i) END;
+  IF i = cmpPfxLen THEN
+    IF cmpPrint THEN
+      nOut.String(name);
+      IF FATFiles.SubDir IN attr THEN nOut.Char('/') END;
+      nOut.Char(' ')
+    ELSE
+      INC(cmpMatched);
+      IF cmpMatched = 1 THEN
+        COPY(name, cmpFirst);
+        cmpFirstIsDir := FATFiles.SubDir IN attr
+      END
     END
   END
 END PathHandler;
@@ -268,7 +273,9 @@ BEGIN
     IF buf[i] = '/' THEN namepfxstart := i + 1 END;
     INC(i)
   END;
-  cmpPfxLen := len - namepfxstart;  (* chars of filename already typed *)
+  i := namepfxstart; j := 0;
+  WHILE i < len DO cmpPfx[j] := buf[i]; INC(i); INC(j) END;
+  cmpPfx[j] := 0X; cmpPfxLen := j;
 
   (* pattern = everything the user typed + "*" *)
   i := argstart; j := 0;
