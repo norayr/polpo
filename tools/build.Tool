@@ -79,3 +79,16 @@ compiler.Compile src/desktop/x86/XCompiler.Mod
 compiler.Compile src/desktop/x86/XBootLinker.Mod
 compiler.Compile src/desktop/x86/XDecoder.Mod
 compiler.Compile src/desktop/x86/XBrowser.Mod
+
+# ARM cross tools in the UI (ARM toolchain itself: ./loksh < arm.Tool)
+compiler.Compile /s src/cli/arm/OBM.Mod
+compiler.Compile /s src/cli/arm/OBS.Mod
+compiler.Compile /s src/cli/arm/OBT.Mod
+compiler.Compile /s src/cli/arm/OBC.Mod
+compiler.Compile /s src/cli/arm/OBE.Mod
+compiler.Compile /s src/cli/arm/OBH.Mod
+compiler.Compile /s src/cli/arm/OBA.Mod
+compiler.Compile /s src/cli/arm/OBP.Mod
+compiler.Compile /s src/desktop/arm/ACompiler.Mod
+compiler.Compile /s src/desktop/arm/ADecoder.Mod
+compiler.Compile /s src/desktop/arm/ABrowser.Mod

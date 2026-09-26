@@ -80,6 +80,30 @@ In theory, mlterm should also work, at least they claim they support sixel mode.
 
 And we don't know how xterm of your OS is compiled. We tested with xterm on Gentoo that is compiled with 'sixel' USE flag. Our friend confirmed that it worked on their Arch. Our other friend confirmed it didn't work on their Debian.
 
+### ARM
+
+polpo also runs on 32-bit ARM Linux. The ARM compiler is the ETH/OLR ARM
+compiler (Oberon-1), running as a cross compiler inside the x86 system:
+
+```
+make arm                         # bin/x86/loksh < tools/arm.Tool
+```
+
+This builds the x86-hosted cross tools (`acompiler`, `alinker`), all ARM
+object files in `obj/arm/`, and the static ARM executable `bin/arm/loksh`.
+Run it from the polpo directory, on an ARM machine or with qemu-arm:
+
+```
+bin/arm/loksh cat.Cat texts/UserGuide.Text
+bin/arm/loksh compiler.Compile hello.Mod     # native ARM compiler
+bin/arm/loksh hello.world
+bin/arm/loksh System.Init                    # the Oberon desktop
+```
+
+On ARM, `compiler.Compile` and `linker.Link` are the ARM compiler and boot
+linker, so the ARM system can rebuild itself. `make arm-sixel` and `make arm-x11`
+switch the ARM Display and Input modules, like `make sixel` and `make x11` for x86.
+
 ### Layout
 
 * `bin/<arch>/loksh` - static executables; run them from the polpo directory
@@ -88,8 +112,8 @@ And we don't know how xterm of your OS is compiled. We tested with xterm on Gent
   (Linux0, Kernel, Modules0), compiler and linker of that architecture
 * `src/common` - modules shared by console and desktop (Files, Texts0, Oberon0, ...)
 * `src/desktop` - desktop modules shared by all architectures; `src/desktop/<arch>` -
-  architecture dependent desktop tools (XCompiler, XDecoder, XBrowser, ...)
-* `tools/` - `.Tool` texts, including the build recipe `build.Tool`
+  architecture dependent desktop tools (XCompiler, ACompiler, decoders, browsers)
+* `tools/` - `.Tool` texts, including the build recipes `build.Tool` and `arm.Tool`
 * `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
 * `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
 
