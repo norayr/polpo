@@ -1,3 +1,3 @@
 export OWIDTH=2000
 export OHEIGHT=1400
-./loksh System.Init
+bin/x86/loksh System.Init

@@ -6,11 +6,12 @@ MODULE shell;
       no args, tty → cbreak with per-keypress echo and Tab completion
       no args, pipe → line-buffered batch mode
 
-    Tab completion scans x86/*.Obj on every keypress — no startup cache,
-    no rehash needed; always reflects the latest compiled state. *)
+    Tab completion scans the loader's object directory (x86/, arm/, see
+    Modules0.objPath) on every keypress — no startup cache, no rehash needed;
+    always reflects the latest compiled state. *)
 
 IMPORT nIn := in, nOut := out, nTermios := termios, Kernel, Files, FATFiles,
-  Modules, Oberon0, oberon, nTexts := texts, ooc2Strings := strings;
+  Modules, Modules0, Oberon0, oberon, nTexts := texts, ooc2Strings := strings;
 
 CONST
   TAB = 9X;
@@ -23,6 +24,23 @@ CONST
   EOT = 4X;   (* Ctrl+D: exit if buffer empty *)
 
   MaxHist = 64;
+
+VAR
+  (* shared state for all Tab completion callbacks *)
+  cmpPfx:        ARRAY 64 OF CHAR;
+  cmpPfxLen:     INTEGER;   (* length of name prefix already typed *)
+  cmpFirst:      ARRAY 256 OF CHAR;
+  cmpMatched:    INTEGER;
+  cmpPrint:      BOOLEAN;
+  cmpFirstIsDir: BOOLEAN;   (* used by path completion *)
+
+  (* command history *)
+  hist:         ARRAY MaxHist OF ARRAY 256 OF CHAR;
+  histCount:    INTEGER;   (* number of stored entries *)
+  histIdx:      INTEGER;   (* browse position; -1 = not browsing *)
+  histSaved:    ARRAY 256 OF CHAR;  (* line saved when browsing starts *)
+  histSavedLen: INTEGER;
+  cmdAdrSize:    INTEGER;   (* bytes per command address in the CmdBlk being read *)
 
 PROCEDURE Erase;
 BEGIN nOut.Char(BS); nOut.Char(' '); nOut.Char(BS)
@@ -60,7 +78,36 @@ BEGIN
   u := 256 * LONG(ORD(hi)) + ORD(lo)
 END ObjReadU16;
 
-(* Position rider at start of CmdBlk; returns nofCmds, or -1 on error. *)
+(* Position rider at start of CmdBlk of an ARM object file (after the F5X tag);
+   returns nofCmds, or -1 on error. *)
+PROCEDURE ArmSeekCmds(VAR R: Files.Rider): INTEGER;
+VAR
+  tag: CHAR;
+  n: LONGINT;
+  nofImps, nofEntries, nofPtrs, nofCmds: INTEGER;
+  dummy: ARRAY 64 OF CHAR;
+  i: INTEGER;
+BEGIN
+  Files.Read(R, tag); IF tag # "0" THEN RETURN -1 END;
+  Files.ReadLInt(R, n); Files.ReadLInt(R, n);  (* refpos, body entry *)
+  Files.ReadInt(R, nofImps); Files.ReadInt(R, nofEntries);
+  Files.ReadInt(R, nofPtrs); Files.ReadInt(R, nofCmds);
+  Files.ReadLInt(R, n); Files.ReadLInt(R, n); Files.ReadLInt(R, n);  (* const, data, code size *)
+  Files.ReadInt(R, i); Files.ReadLInt(R, n);  (* nofRecs, key *)
+  Files.ReadString(R, dummy);  (* module name *)
+  Files.Read(R, tag); IF tag # 085X THEN RETURN -1 END;  (* imports *)
+  i := 0; WHILE i < nofImps DO Files.ReadLInt(R, n); Files.ReadString(R, dummy); INC(i) END;
+  Files.Read(R, tag); IF tag # 082X THEN RETURN -1 END;  (* entries *)
+  i := 0; WHILE i < nofEntries DO Files.ReadLInt(R, n); INC(i) END;
+  Files.Read(R, tag); IF tag # 084X THEN RETURN -1 END;  (* pointers *)
+  i := 0; WHILE i < nofPtrs DO Files.ReadLInt(R, n); INC(i) END;
+  Files.Read(R, tag); IF tag # 083X THEN RETURN -1 END;  (* commands *)
+  cmdAdrSize := 4;
+  RETURN nofCmds
+END ArmSeekCmds;
+
+(* Position rider at start of CmdBlk; returns nofCmds, or -1 on error.
+   Understands x86 (BBX AFX) and ARM (F5X "0") object files. *)
 PROCEDURE ObjSeekCmds(VAR R: Files.Rider): INTEGER;
 VAR
   tag: CHAR;
@@ -69,8 +116,11 @@ VAR
   dummy: ARRAY 64 OF CHAR;
   i: INTEGER;
 BEGIN
-  Files.Read(R, tag); IF tag # 0BBX THEN RETURN -1 END;
+  Files.Read(R, tag);
+  IF tag = 0F5X THEN RETURN ArmSeekCmds(R) END;
+  IF tag # 0BBX THEN RETURN -1 END;
   Files.Read(R, tag); IF tag # 0AFX THEN RETURN -1 END;
+  cmdAdrSize := 2;
   Files.ReadNum(R, symSize);
   Files.Set(R, Files.Base(R), Files.Pos(R) + symSize);
   Files.ReadLInt(R, refSize);
@@ -86,6 +136,23 @@ BEGIN
   Files.Read(R, tag); IF tag # 083X THEN RETURN -1 END;  (* CmdBlk *)
   RETURN nofCmds
 END ObjSeekCmds;
+
+(* Read one CmdBlk entry, skipping its address. *)
+PROCEDURE ObjReadCmd(VAR R: Files.Rider; VAR name: ARRAY OF CHAR);
+VAR n: LONGINT;
+BEGIN
+  ObjReadStr(R, name);
+  IF cmdAdrSize = 4 THEN Files.ReadLInt(R, n) ELSE ObjReadU16(R, n) END
+END ObjReadCmd;
+
+(* Object file name of module modname in the loader's object directory. *)
+PROCEDURE ObjFileName(modname: ARRAY OF CHAR; VAR fname: ARRAY OF CHAR);
+VAR i, j: INTEGER;
+BEGIN
+  i := 0; WHILE Modules0.objPath[i] # 0X DO fname[i] := Modules0.objPath[i]; INC(i) END;
+  j := 0; WHILE modname[j] # 0X DO fname[i] := modname[j]; INC(i); INC(j) END;
+  fname[i] := '.'; fname[i+1] := 'O'; fname[i+2] := 'b'; fname[i+3] := 'j'; fname[i+4] := 0X
+END ObjFileName;
 
 (* ---- procedure-name completion ------------------------------------- *)
 
@@ -134,21 +201,19 @@ BEGIN
   END
 END CompleteProcMem;
 
-(* Complete proc name after dot by parsing x86/ModName.Obj CmdBlk. *)
+(* Complete proc name after dot by parsing the CmdBlk of ModName.Obj. *)
 PROCEDURE CompleteProcObj(modname: ARRAY OF CHAR;
                            VAR buf: ARRAY OF CHAR; VAR len: INTEGER;
                            dotpos, pfxlen: INTEGER);
 VAR
-  fname: ARRAY 64 OF CHAR;
+  fname: ARRAY 192 OF CHAR;
   f: Files.File;
   R: Files.Rider;
   nofCmds, i, j, matched: INTEGER;
   n: LONGINT;
   cname, first: ARRAY 64 OF CHAR;
 BEGIN
-  fname[0]:='x'; fname[1]:='8'; fname[2]:='6'; fname[3]:='/';
-  i := 0; WHILE modname[i] # 0X DO fname[4+i] := modname[i]; INC(i) END;
-  fname[4+i]:='.'; fname[5+i]:='O'; fname[6+i]:='b'; fname[7+i]:='j'; fname[8+i]:=0X;
+  ObjFileName(modname, fname);
   f := Files.Old(fname);
   IF f = NIL THEN RETURN END;
   Files.Set(R, f, 0);
@@ -157,7 +222,7 @@ BEGIN
   matched := 0;
   i := 0;
   WHILE i < nofCmds DO
-    ObjReadStr(R, cname); ObjReadU16(R, n);
+    ObjReadCmd(R, cname);
     j := 0;
     WHILE (j < pfxlen) & (buf[dotpos+1+j] = cname[j]) DO INC(j) END;
     IF j = pfxlen THEN
@@ -178,7 +243,7 @@ BEGIN
     IF nofCmds >= 0 THEN
       i := 0;
       WHILE i < nofCmds DO
-        ObjReadStr(R, cname); ObjReadU16(R, n);
+        ObjReadCmd(R, cname);
         j := 0;
         WHILE (j < pfxlen) & (buf[dotpos+1+j] = cname[j]) DO INC(j) END;
         IF j = pfxlen THEN nOut.String(cname); nOut.Char(' ') END;
@@ -207,16 +272,7 @@ BEGIN
   END
 END TryCompleteProc;
 
-(* ---- module-name completion from x86/*.Obj ------------------------- *)
-
-VAR
-  (* shared state for all Tab completion callbacks *)
-  cmpPfx:        ARRAY 64 OF CHAR;
-  cmpPfxLen:     INTEGER;   (* length of name prefix already typed *)
-  cmpFirst:      ARRAY 256 OF CHAR;
-  cmpMatched:    INTEGER;
-  cmpPrint:      BOOLEAN;
-  cmpFirstIsDir: BOOLEAN;   (* used by path completion *)
+(* ---- module-name completion from the object directory -------------- *)
 
 PROCEDURE ObjHandler(name: ARRAY OF CHAR; time, date, size: LONGINT;
                      attr: SET; VAR continue: BOOLEAN);
@@ -304,6 +360,7 @@ END TryCompletePath;
 
 PROCEDURE TryComplete(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
 VAR
+  pat: ARRAY 192 OF CHAR;
   i, dotpos, spacepos: INTEGER;
   res: LONGINT;
 BEGIN
@@ -320,10 +377,11 @@ BEGIN
   END;
   IF dotpos >= 0 THEN TryCompleteProc(buf, len, dotpos); RETURN END;
 
-  (* module name: scan x86/*.Obj fresh on every Tab press *)
+  (* module name: scan <objPath>*.Obj fresh on every Tab press *)
+  ObjFileName("*", pat);
   i := 0; WHILE i < len DO cmpPfx[i] := buf[i]; INC(i) END; cmpPfx[i] := 0X;
   cmpPfxLen := len; cmpMatched := 0; cmpFirst[0] := 0X; cmpPrint := FALSE;
-  FATFiles.Enumerate("x86/*.Obj", ObjHandler, res);
+  FATFiles.Enumerate(pat, ObjHandler, res);
 
   IF cmpMatched = 1 THEN
     i := cmpPfxLen;
@@ -336,19 +394,12 @@ BEGIN
   ELSIF cmpMatched > 1 THEN
     nOut.Char(LF);
     cmpPrint := TRUE;
-    FATFiles.Enumerate("x86/*.Obj", ObjHandler, res);
+    FATFiles.Enumerate(pat, ObjHandler, res);
     ReprintLine(buf, len)
   END
 END TryComplete;
 
 (* ---- command history ----------------------------------------------- *)
-
-VAR
-  hist:         ARRAY MaxHist OF ARRAY 256 OF CHAR;
-  histCount:    INTEGER;   (* number of stored entries *)
-  histIdx:      INTEGER;   (* browse position; -1 = not browsing *)
-  histSaved:    ARRAY 256 OF CHAR;  (* line saved when browsing starts *)
-  histSavedLen: INTEGER;
 
 PROCEDURE AddHist(VAR buf: ARRAY OF CHAR; len: INTEGER);
 VAR i: INTEGER;

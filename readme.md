@@ -80,6 +80,22 @@ In theory, mlterm should also work, at least they claim they support sixel mode.
 
 And we don't know how xterm of your OS is compiled. We tested with xterm on Gentoo that is compiled with 'sixel' USE flag. Our friend confirmed that it worked on their Arch. Our other friend confirmed it didn't work on their Debian.
 
+### Layout
+
+* `bin/<arch>/loksh` - static executables; run them from the polpo directory
+* `obj/<arch>/` - object files loaded by `bin/<arch>/loksh`
+* `src/cli` - console modules shared by all architectures; `src/cli/<arch>` - runtime
+  (Linux0, Kernel, Modules0), compiler and linker of that architecture
+* `src/common` - modules shared by console and desktop (Files, Texts0, Oberon0, ...)
+* `src/desktop` - desktop modules shared by all architectures; `src/desktop/<arch>` -
+  architecture dependent desktop tools (XCompiler, XDecoder, XBrowser, ...)
+* `tools/` - `.Tool` texts, including the build recipe `build.Tool`
+* `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
+* `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
+
+`Files.Old` looks for a plain file name in the current directory, then in `share/`
+and `tools/`, so `Edit.Open System.Tool` and the like work from the polpo directory.
+
 ---
 
 

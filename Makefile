@@ -1,12 +1,15 @@
 
+LOKSH = bin/x86/loksh
 
 fast:
-		./loksh < build.Tool
+		$(LOKSH) < tools/build.Tool
 
 sixel:
-		./loksh compiler.Compile /x src/polpo/POLPO.SXL.Display.Mod
-		./loksh compiler.Compile /s src/polpo/POLPO.SXL.Input.Mod
+		$(LOKSH) compiler.Compile /x src/desktop/POLPO.SXL.Display.Mod
+		$(LOKSH) compiler.Compile /s src/desktop/POLPO.SXL.Input.Mod
 
 x11:
-		./loksh compiler.Compile /x src/polpo/POLPO.Display.Mod
-		./loksh compiler.Compile /s src/polpo/POLPO.Input.Mod
+		$(LOKSH) compiler.Compile /x src/desktop/POLPO.Display.Mod
+		$(LOKSH) compiler.Compile /s src/desktop/POLPO.Input.Mod
+
+.PHONY: fast sixel x11
