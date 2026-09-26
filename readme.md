@@ -83,15 +83,22 @@ And we don't know how xterm of your OS is compiled. We tested with xterm on Gent
 ### ARM
 
 polpo also runs on 32-bit ARM Linux. The ARM compiler is the ETH/OLR ARM
-compiler (Oberon-1), running as a cross compiler inside the x86 system:
+compiler (Oberon-1). Object files are in `obj/arm/`, the static executable is
+`bin/arm/loksh`.
 
 ```
-make arm                         # bin/x86/loksh < tools/arm.Tool
+make arm            # on x86: cross compile the ARM system
+make arm-native     # on ARM: rebuild it with the ARM compiler (on x86: under qemu-arm)
+make arm-run        # start the ARM desktop (System.Init); on x86 through qemu-arm
+make arm-shell      # ARM console
 ```
 
-This builds the x86-hosted cross tools (`acompiler`, `alinker`), all ARM
-object files in `obj/arm/`, and the static ARM executable `bin/arm/loksh`.
-Run it from the polpo directory, on an ARM machine or with qemu-arm:
+`make arm` runs `tools/arm-cross.Tool` (the x86-hosted cross tools `acompiler`
+and `alinker`) and then `tools/arm.Tool` (the ARM system). `make arm-native`
+runs only `tools/arm.Tool`, with the ARM compiler. Both link
+`bin/arm/loksh.new` and move it to `bin/arm/loksh`.
+
+Directly, from the polpo directory (prefix `qemu-arm` on x86):
 
 ```
 bin/arm/loksh cat.Cat texts/UserGuide.Text
@@ -101,8 +108,8 @@ bin/arm/loksh System.Init                    # the Oberon desktop
 ```
 
 On ARM, `compiler.Compile` and `linker.Link` are the ARM compiler and boot
-linker, so the ARM system can rebuild itself. `make arm-sixel` and `make arm-x11`
-switch the ARM Display and Input modules, like `make sixel` and `make x11` for x86.
+linker. `make arm-sixel` and `make arm-x11` switch the ARM Display and Input
+modules, like `make sixel` and `make x11` for x86.
 
 ### Layout
 
@@ -113,7 +120,7 @@ switch the ARM Display and Input modules, like `make sixel` and `make x11` for x
 * `src/common` - modules shared by console and desktop (Files, Texts0, Oberon0, ...)
 * `src/desktop` - desktop modules shared by all architectures; `src/desktop/<arch>` -
   architecture dependent desktop tools (XCompiler, ACompiler, decoders, browsers)
-* `tools/` - `.Tool` texts, including the build recipes `build.Tool` and `arm.Tool`
+* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool` and `arm.Tool`
 * `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
 * `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
 

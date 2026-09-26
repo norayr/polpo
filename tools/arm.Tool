@@ -1,17 +1,8 @@
-# ARM cross toolchain and the ARM polpo system (console and UI).
-# Usage: bin/x86/loksh < tools/arm.Tool     Run: qemu-arm bin/arm/loksh  (bin/arm/loksh on ARM)
-
-# x86-hosted ARM cross compiler and boot linker (objects in obj/x86/)
-compiler.Compile /s src/cli/arm/OBM.Mod
-compiler.Compile /s src/cli/arm/OBS.Mod
-compiler.Compile /s src/cli/arm/OBT.Mod
-compiler.Compile /s src/cli/arm/OBC.Mod
-compiler.Compile /s src/cli/arm/OBE.Mod
-compiler.Compile /s src/cli/arm/OBH.Mod
-compiler.Compile /s src/cli/arm/OBA.Mod
-compiler.Compile /s src/cli/arm/OBP.Mod
-compiler.Compile /s src/cli/arm/acompiler.Mod
-compiler.Compile /s src/cli/arm/alinker.Mod
+# The ARM polpo system (console and desktop) in obj/arm/, and bin/arm/loksh.
+# Uses acompiler/alinker: the cross tools on x86 (after tools/arm-cross.Tool),
+# the native ARM compiler on ARM.
+#   on x86:  make arm          on ARM:  make arm-native
+# The executable is linked to bin/arm/loksh.new; make moves it to bin/arm/loksh.
 
 # ARM runtime (objects in obj/arm/)
 acompiler.Compile /s src/cli/arm/Linux0.Mod
@@ -89,4 +80,4 @@ acompiler.Compile /s src/desktop/arm/ADecoder.Mod
 acompiler.Compile /s src/desktop/arm/ABrowser.Mod
 
 # static ARM executable: Linux0 Kernel Modules0 loksh
-alinker.Link /q bin/arm/loksh loksh
+alinker.Link /q bin/arm/loksh.new loksh
