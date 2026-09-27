@@ -146,18 +146,38 @@ On MIPS, `compiler.Compile` and `linker.Link` are the MIPS compiler and boot
 linker. The compiler avoids misaligned word accesses (it uses LWL/LWR and
 SWL/SWR where alignment is unknown), so no kernel fixups are needed.
 
+### ARMv7
+
+Besides the Oberon-1 ARM compiler for older ARM processors (`make arm`, `obj/arm/`),
+polpo has an ARMv7 system built with OLR's OP2 ARM back end `AOPL`..`AOPV` from the
+same ROP2 family as MIPS and RISC-V. Object files are in `obj/armv7/`, the static
+executable is `bin/armv7/loksh`.
+
+```
+make armv7          # on x86: cross compile the ARMv7 system
+make armv7-native   # rebuild it with the ARMv7 compiler (on x86: under qemu-arm)
+make armv7-run      # start the ARMv7 desktop (System.Init); on x86 through qemu-arm
+make armv7-shell    # ARMv7 console
+```
+
+The ARMv7 compiler uses software division by default, so the code also runs on
+Cortex-A8 and A9, which have no divide instruction; `/d` selects the hardware `sdiv`.
+
+Note: the ROP2 compilers (MIPS, RISC-V, ARMv7) trap on `DIV` and `MOD` by a divisor
+that is not positive, while the x86 compiler computes the floored result.
+
 ### Layout
 
 * `bin/<arch>/loksh` - static executables; run them from the polpo directory
 * `obj/<arch>/` - object files loaded by `bin/<arch>/loksh`
 * `src/cli` - console modules shared by all architectures; `src/cli/<arch>` - runtime
   (Linux0, Kernel, Modules0), compiler and linker of that architecture; `src/cli/rop2` -
-  the ROP2 compiler front end, runtime (Kernel, Modules0) and boot linker shared by MIPS
-  and RISC-V
+  the ROP2 compiler front end, runtime (Kernel, Modules0) and boot linker shared by MIPS,
+  RISC-V and ARMv7
 * `src/common` - modules shared by console and desktop (Files, Texts0, Oberon0, ...)
 * `src/desktop` - desktop modules shared by all architectures; `src/desktop/<arch>` -
   architecture dependent desktop modules (XCompiler, ACompiler, RCompiler, decoders, browsers, System on RISC-V)
-* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool`, `arm.Tool`, `rop2-cross.Tool`, `riscv.Tool` and `mips.Tool`
+* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool`, `arm.Tool`, `rop2-cross.Tool`, `riscv.Tool`, `mips.Tool` and `armv7.Tool`
 * `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
 * `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
 

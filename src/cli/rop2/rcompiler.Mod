@@ -17,6 +17,7 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
     target: ARRAY 32 OF CHAR;  (* name of the target *)
     backend: ARRAY 32 OF CHAR;  (* back end module: VOPV, MOPV, AOPV *)
     init, module: Modules.Command;  (* its Init and Module *)
+    targetopt: SET;  (* default options of the target *)
 
   PROCEDURE SignOn;
   BEGIN
@@ -54,7 +55,7 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
   PROCEDURE Module*(VAR source: Texts.Reader; options: ARRAY OF CHAR; VAR error: BOOLEAN);
     VAR ch: CHAR; i: INTEGER; ext, new: BOOLEAN;
   BEGIN
-    OPM.opt := defopt; OPM.OFtag := tag; COPY(dir, OPM.Dir); i := 0;
+    OPM.opt := defopt / targetopt; OPM.OFtag := tag; COPY(dir, OPM.Dir); i := 0;
     REPEAT
       ch := options[i]; INC(i);
       IF ch = "x" THEN OPM.opt := OPM.opt / {inxchk}
@@ -126,7 +127,7 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
     Out.String("  /r       range checks (off)"); Out.Ln;
     Out.String("  /s       allow new symbol file"); Out.Ln;
     Out.String("  /e       allow extended symbol file"); Out.Ln;
-    Out.String("  /d       software division"); Out.Ln;
+    Out.String("  /d       software division (ARMv7: on, /d selects hardware sdiv)"); Out.Ln;
     Out.String("  /Pdir/   symbol and object file directory (default obj/<target>/)"); Out.Ln;
     Out.Ln;
     Out.String("Options apply to the files that follow them."); Out.Ln
@@ -135,7 +136,9 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
   (** Select the target: back end module, object directory and object file tag. *)
   PROCEDURE SetTarget*(name, backendMod, directory: ARRAY OF CHAR; objTag: CHAR);
   BEGIN
-    COPY(name, target); COPY(backendMod, backend); COPY(directory, dir); tag := objTag
+    COPY(name, target); COPY(backendMod, backend); COPY(directory, dir); tag := objTag;
+    (* ARMv7: software division by default, Cortex-A8 and A9 have no divide instruction *)
+    IF name = "ARMv7" THEN targetopt := {softdiv} ELSE targetopt := {} END
   END SetTarget;
 
   PROCEDURE SetHostTarget;

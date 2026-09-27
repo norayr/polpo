@@ -1,5 +1,5 @@
-# x86-hosted ROP2 cross tools for MIPS and RISC-V (objects in obj/x86/). x86 only.
-# Usage: make mips, make riscv   (run this, then tools/mips.Tool or tools/riscv.Tool)
+# x86-hosted ROP2 cross tools for MIPS, RISC-V and ARMv7 (objects in obj/x86/). x86 only.
+# Usage: make mips, make riscv, make armv7   (run this, then tools/<arch>.Tool)
 
 # shared front end, compiler frontend and boot linker
 compiler.Compile /s src/cli/rop2/ROPM.Mod
@@ -21,3 +21,9 @@ compiler.Compile /s src/cli/mips/MOPL.Mod
 compiler.Compile /s src/cli/mips/MOPC.Mod
 compiler.Compile /s src/cli/mips/MOPV.Mod
 compiler.Compile /s src/cli/mips/mcompiler.Mod
+
+# ARMv7 back end
+compiler.Compile /s src/cli/armv7/AOPL.Mod
+compiler.Compile /s src/cli/armv7/AOPC.Mod
+compiler.Compile /s src/cli/armv7/AOPV.Mod
+compiler.Compile /s src/cli/armv7/a7compiler.Mod

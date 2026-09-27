@@ -93,7 +93,7 @@ compiler.Compile /s src/desktop/arm/ACompiler.Mod
 compiler.Compile /s src/desktop/arm/ADecoder.Mod
 compiler.Compile /s src/desktop/arm/ABrowser.Mod
 
-# MIPS and RISC-V cross tools in the desktop (toolchains themselves: make mips, make riscv)
+# MIPS, RISC-V and ARMv7 cross tools in the desktop (toolchains themselves: make mips, make riscv, make armv7)
 compiler.Compile /s src/cli/rop2/ROPM.Mod
 compiler.Compile /s src/cli/rop2/ROPS.Mod
 compiler.Compile /s src/cli/rop2/ROPT.Mod
@@ -108,3 +108,7 @@ compiler.Compile /s src/cli/mips/MOPL.Mod
 compiler.Compile /s src/cli/mips/MOPC.Mod
 compiler.Compile /s src/cli/mips/MOPV.Mod
 compiler.Compile /s src/desktop/mips/M2Decoder.Mod
+compiler.Compile /s src/cli/armv7/AOPL.Mod
+compiler.Compile /s src/cli/armv7/AOPC.Mod
+compiler.Compile /s src/cli/armv7/AOPV.Mod
+compiler.Compile /s src/desktop/armv7/A32Decoder.Mod

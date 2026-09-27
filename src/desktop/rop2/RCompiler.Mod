@@ -136,6 +136,7 @@ END SetOpt;
   
   BEGIN
     error := FALSE;  globopt:= defopt;
+    IF OPM.OFtag = armv7tag THEN INCL(globopt, softdiv) END;  (* polpo: ARMv7 software division by default, as rcompiler *)
     Texts.OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Texts.Scan(S);
     IF (S.class = Texts.Char) & (S.c # OptionChar) THEN
       IF S.c = "*" THEN

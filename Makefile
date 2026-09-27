@@ -8,9 +8,11 @@ HOSTARCH := $(shell uname -m)
 ifneq ($(filter arm% aarch64,$(HOSTARCH)),)
 ARM = bin/arm/loksh
 ACOMPILE = $(ARM) compiler.Compile
+ARMV7 = bin/armv7/loksh
 else
 ARM = qemu-arm bin/arm/loksh
 ACOMPILE = $(X86) acompiler.Compile
+ARMV7 = qemu-arm bin/armv7/loksh
 endif
 
 ifneq ($(filter riscv32,$(HOSTARCH)),)
@@ -107,4 +109,24 @@ mips-run:
 mips-shell:
 		$(MIPS)
 
-.PHONY: fast sixel x11 arm arm-native arm-run arm-shell arm-sixel arm-x11 riscv riscv-native riscv-run riscv-shell mips mips-native mips-run mips-shell
+# ---- ARMv7 (OP2 compiler; make arm is for older ARM processors) ----
+
+# cross compile the ARMv7 system on x86
+armv7:
+		$(X86) < tools/rop2-cross.Tool
+		$(X86) < tools/armv7.Tool
+		mv bin/armv7/loksh.new bin/armv7/loksh
+
+# build the ARMv7 system with the ARMv7 compiler: natively on ARM, under qemu-arm elsewhere
+armv7-native:
+		$(ARMV7) < tools/armv7.Tool
+		mv bin/armv7/loksh.new bin/armv7/loksh
+
+# start the ARMv7 desktop / console (qemu-arm unless this machine is ARM)
+armv7-run:
+		$(ARMV7) System.Init
+
+armv7-shell:
+		$(ARMV7)
+
+.PHONY: fast sixel x11 arm arm-native arm-run arm-shell arm-sixel arm-x11 riscv riscv-native riscv-run riscv-shell mips mips-native mips-run mips-shell armv7 armv7-native armv7-run armv7-shell
