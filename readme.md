@@ -82,20 +82,40 @@ And we don't know how xterm of your OS is compiled. We tested with xterm on Gent
 
 ### HiDPI screens: font scaling
 
-Screen fonts can be scaled, so that every text, including existing documents,
-is shown larger with the real Syntax and Oberon bitmap fonts:
+Screen fonts can be scaled, so that every text, including existing documents, is
+shown larger with the real Syntax and Oberon bitmap fonts. The scale is in percent:
 
-* `FontScale = 150` in the `System` section of `Oberon.Text`, or the environment
-  variable `OFONTSCALE=150` (percent);
-* `System.SetFontScale 200` changes it while Oberon runs: the fonts are reloaded,
-  a message is broadcast and all viewers lay out their texts again;
+* `FontScale = 150` in the `System` section of `Oberon.Text` sets it at startup
+  (next to `TimeDiff`); the environment variable `OFONTSCALE=150` overrides it;
+* `System.SetFontScale 150` changes it while Oberon runs (middle-click it in a tool
+  text): the fonts are reloaded, a message is broadcast, and all viewers, menus and
+  the log lay out their texts again. `System.SetFontScale ^` takes a selected number,
+  `System.SetFontScale` alone shows the current scale in the log;
 * without a setting the scale follows the screen resolution reported by X11 or the
-  framebuffer (96 dpi = 100%); many X servers report 96 dpi, so set it explicitly.
+  framebuffer (96 dpi = 100%). Many X servers report 96 dpi, so set it explicitly.
 
 A text asking for `Syntax10.Scn.Fnt` gets the existing font nearest to 10 * scale / 100,
 of the same family if possible (at 200% the real Syntax20), else of the Oberon family.
-Texts keep their font names, so documents are stored unchanged. `LineSpacing = 150`
-(percent of the font height, default 150) sets the spacing of lines in text viewers.
+Texts keep their font names, so documents are stored unchanged. `LineSpacing = 150` in
+the `System` section (percent of the font height, default 150) sets the spacing of lines
+in text viewers.
+
+### Changing the fonts of a document
+
+* `Edit.ChangeFont Syntax10.Scn.Fnt` sets the font of the selected text: select the text
+  with the right mouse button first, then middle-click the command. It gives the whole
+  selection one font.
+* `Edit.ScaleFonts 50 *` scales all fonts of the text in the marked viewer (mark it with
+  the star, F1), keeping family and style: Syntax20 becomes Syntax10, Syntax20b becomes
+  Syntax10b; a size that does not exist becomes the nearest one that does. Store the text
+  afterwards (Store in its menu).
+* `Edit.ScaleFonts 50 System.Tool Oberon.Text ~` does the same for files, and stores them
+  (the old versions are kept as `.Bak`). Plain ASCII files are left alone.
+* `Edit.RenameFont Syntax20.Scn.Fnt Syntax10.Scn.Fnt *` (or with file names) replaces one
+  font by another in the whole text.
+
+With font scaling, documents can keep normal sizes (Syntax10, Syntax12) and be shown larger
+on HiDPI screens; `Edit.ScaleFonts 50` brings documents that were enlarged by hand back.
 
 ### ARM
 

@@ -266,14 +266,13 @@ of characters, each character being a pattern and and metric data.
     END
   END DecideScale;
 
-  (* name of a screen font "<family><size><style>.Scn.Fnt": the name of the existing font file
-     of the same family and style nearest to size*scale/100, within a quarter of that size.
-     found is FALSE if there is none, or if name is not a scaled screen font. *)
-  PROCEDURE ScaledName(VAR name, sname: ARRAY OF CHAR; VAR found: BOOLEAN);
-    VAR i, j, k, n, size, target, tol, d, cand: LONGINT; rest: ARRAY 32 OF CHAR;
+  (** For a screen font name "<family><size><style>.Scn.Fnt": sname is the existing font file
+    of the same family and style nearest to size*percent/100, at most tol sizes away (tol < 0:
+    a quarter of that size). found is FALSE if there is none, or if name is not such a font name. *)
+  PROCEDURE NearestName*(name: ARRAY OF CHAR; percent, tol: LONGINT; VAR sname: ARRAY OF CHAR; VAR found: BOOLEAN);
+    VAR i, j, k, n, size, target, d, cand: LONGINT; rest: ARRAY 32 OF CHAR;
   BEGIN
-    found := FALSE; DecideScale;
-    IF scale = 100 THEN RETURN END;
+    found := FALSE;
     i := 0; WHILE (CAP(name[i]) >= "A") & (CAP(name[i]) <= "Z") DO INC(i) END;
     j := i; size := 0;
     WHILE (name[j] >= "0") & (name[j] <= "9") DO size := size*10 + ORD(name[j]) - ORD("0"); INC(j) END;
@@ -281,7 +280,7 @@ of characters, each character being a pattern and and metric data.
     k := 0; WHILE (name[j] # 0X) & (k < LEN(rest)-1) DO rest[k] := name[j]; INC(j); INC(k) END;
     rest[k] := 0X;
     IF (k < 8) OR (rest[k-8] # ".") OR (rest[k-7] # "S") OR (rest[k-6] # "c") OR (rest[k-5] # "n") THEN RETURN END;
-    target := (size*scale + 50) DIV 100; tol := target DIV 4 + 1; d := 0;
+    target := (size*percent + 50) DIV 100; IF tol < 0 THEN tol := target DIV 4 + 1 END; d := 0;
     WHILE ~found & (d <= tol) DO
       n := 0;
       WHILE ~found & (n < 2) DO
@@ -299,6 +298,13 @@ of characters, each character being a pattern and and metric data.
       END;
       INC(d)
     END
+  END NearestName;
+
+  (* the existing screen font file nearest to name at the current scale, see NearestName *)
+  PROCEDURE ScaledName(VAR name, sname: ARRAY OF CHAR; VAR found: BOOLEAN);
+  BEGIN
+    found := FALSE; DecideScale;
+    IF scale # 100 THEN NearestName(name, scale, -1, sname, found) END
   END ScaledName;
 
   (* OpenFont, with scaling the scaled font file if there is one near enough, else NIL *)
@@ -322,25 +328,26 @@ of characters, each character being a pattern and and metric data.
       IF name = "Default" THEN
         IF TraceAlias THEN Kernel.WriteString(L.name);  Kernel.WriteString(" -> ") END;
         IF Default # NIL THEN COPY(Default.name, name) ELSE name := "Oberon10.Scn.Fnt" END;
+        IF (name[0] = "S") & (name[1] = "y") & (name[2] = "n") & (name[3] = "t") & (name[4] = "a") & (name[5] = "x") THEN
+          name := "Oberon10.Scn.Fnt"  (* polpo: a Syntax default is drawn with the Oberon family *)
+        END;
         i := 0;  WHILE (name[i] # 0X) & ((name[i] < "0") OR (name[i] > "9")) DO INC(i) END;
         j := 7;  WHILE L.name[j] # 0X DO name[i] := L.name[j];  INC(i);  INC(j) END;
         name[i] := 0X;
         IF TraceAlias THEN Kernel.WriteString(name);  Kernel.WriteLn END;
-        COPY(name, L.name);
-        OpenScaled(name, f, scaled)
+        OpenScaled(name, f, scaled)  (* polpo: L keeps its requested name *)
       ELSE
         name[6] := 0X;
         IF conv & (name = "Syntax") THEN
           IF TraceAlias THEN Kernel.WriteString(L.name);  Kernel.WriteString(" -> ") END;
-          IF Default # NIL THEN name := Default.name ELSE name := "Oberon10.Scn.Fnt" END;  (* polpo: Default may not be set yet *)
+          name := "Oberon10.Scn.Fnt";  (* polpo: Syntax is drawn with the Oberon family; Default may be a Syntax font now *)
           j := 0;  WHILE (name[j] # 0X) & ((name[j] < "0") OR (name[j] > "9")) DO INC(j) END;
           i := 6;  WHILE (L.name[i] >= "0") & (L.name[i] <= "9") DO name[j] := L.name[i];  INC(i);  INC(j) END;
           IF L.name[i] = "m" THEN name[j] := "b";  INC(i);  INC(j) END;  (* Syntax medium -> Oberon bold *)
           WHILE L.name[i] # 0X DO name[j] := L.name[i];  INC(i);  INC(j) END;
           name[j] := 0X;
           IF TraceAlias THEN Kernel.WriteString(name);  Kernel.WriteLn END;
-          COPY(name, L.name);
-          OpenScaled(name, f, scaled)
+          OpenScaled(name, f, scaled)  (* polpo: L keeps its requested name, texts keep Syntax *)
         END
       END
     END
