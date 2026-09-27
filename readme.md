@@ -36,6 +36,16 @@ Run:
 ./wishup hello.world
 ```
 
+Show an Oberon text on the terminal, with its colours, or only its characters:
+
+```
+bin/x86/loksh texts.Show texts/UserGuide.Text
+bin/x86/loksh texts.ShowPlain texts/UserGuide.Text | less
+```
+
+Programs can call `texts.ShowFile(name, rich)`. `cat.Cat [-p]` still works but is
+deprecated.
+
 ### X11 Oberon
 
 Currently whole Oberon system gets build with minimal set of modules. So after you built with `make` you will find `xoberon` binary.
@@ -149,7 +159,7 @@ runs only `tools/arm.Tool`, with the ARM compiler. Both link
 Directly, from the polpo directory (prefix `qemu-arm` on x86):
 
 ```
-bin/arm/loksh cat.Cat texts/UserGuide.Text
+bin/arm/loksh texts.Show texts/UserGuide.Text
 bin/arm/loksh compiler.Compile hello.Mod     # native ARM compiler
 bin/arm/loksh hello.world
 bin/arm/loksh System.Init                    # the Oberon desktop

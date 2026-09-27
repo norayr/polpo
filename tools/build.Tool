@@ -16,8 +16,8 @@ compiler.Compile /s src/common/regex.Mod
 compiler.Compile /s src/common/Utf8.Mod
 compiler.Compile /s src/common/Texts0.Mod
 compiler.Compile /s src/common/RXA.Mod
-compiler.Compile /s src/cli/texts.Mod
 compiler.Compile /s src/common/Oberon0.Mod
+compiler.Compile /s src/cli/texts.Mod
 compiler.Compile /s src/cli/oberon.Mod
 compiler.Compile /s src/cli/in.Mod
 compiler.Compile /s src/cli/termios.Mod

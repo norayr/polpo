@@ -21,8 +21,8 @@ rvcompiler.Compile /s src/common/regex.Mod
 rvcompiler.Compile /s src/common/Utf8.Mod
 rvcompiler.Compile /s src/common/Texts0.Mod
 rvcompiler.Compile /s src/common/RXA.Mod
-rvcompiler.Compile /s src/cli/texts.Mod
 rvcompiler.Compile /s src/common/Oberon0.Mod
+rvcompiler.Compile /s src/cli/texts.Mod
 rvcompiler.Compile /s src/cli/oberon.Mod
 rvcompiler.Compile /s src/cli/in.Mod
 rvcompiler.Compile /s src/cli/termios.Mod

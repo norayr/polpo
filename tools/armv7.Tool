@@ -22,8 +22,8 @@ a7compiler.Compile /s src/common/regex.Mod
 a7compiler.Compile /s src/common/Utf8.Mod
 a7compiler.Compile /s src/common/Texts0.Mod
 a7compiler.Compile /s src/common/RXA.Mod
-a7compiler.Compile /s src/cli/texts.Mod
 a7compiler.Compile /s src/common/Oberon0.Mod
+a7compiler.Compile /s src/cli/texts.Mod
 a7compiler.Compile /s src/cli/oberon.Mod
 a7compiler.Compile /s src/cli/in.Mod
 a7compiler.Compile /s src/cli/termios.Mod

@@ -1,6 +1,6 @@
 MODULE Oberon0;
 
-IMPORT Kernel, Texts := texts, Modules, Files;
+IMPORT Kernel, Texts := Texts0, Modules, Files;  (* Texts0: texts imports Oberon0 *)
 
 CONST OberonText = "Oberon.Text";
 

@@ -22,8 +22,8 @@ acompiler.Compile /s src/common/regex.Mod
 acompiler.Compile /s src/common/Utf8.Mod
 acompiler.Compile /s src/common/Texts0.Mod
 acompiler.Compile /s src/common/RXA.Mod
-acompiler.Compile /s src/cli/texts.Mod
 acompiler.Compile /s src/common/Oberon0.Mod
+acompiler.Compile /s src/cli/texts.Mod
 acompiler.Compile /s src/cli/oberon.Mod
 acompiler.Compile /s src/cli/in.Mod
 acompiler.Compile /s src/cli/termios.Mod
