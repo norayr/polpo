@@ -6,7 +6,9 @@ MODULE Root;  (** polpo installation root: where bin/, obj/, share/, tools/, fon
      3. otherwise argv[0], if it contains a "/".
    path is the root with a trailing "/", or "" when it is unknown (the current directory).
    Obj gives the object directory of an architecture: obj/<arch>/ in the current directory
-   if it exists there, else in the root; so running from the polpo directory is unchanged. *)
+   if it exists there, else in the root; so running from the polpo directory is unchanged.
+   RootObj always gives the one in the root: the module loaders look there for modules
+   that are not in a local obj/<arch>/, so a directory of your own objects is possible. *)
 
   IMPORT Linux0, Kernel, SYSTEM;
 
@@ -70,6 +72,15 @@ MODULE Root;  (** polpo installation root: where bin/, obj/, share/, tools/, fon
     IF Exists(local) OR (path[0] = 0X) THEN COPY(local, s) ELSE Join(local, s) END;
     Append(s, "/")
   END Obj;
+
+  (** Object directory of arch in the root: "<root>obj/<arch>/", or "obj/<arch>/" when the
+    root is unknown. *)
+  PROCEDURE RootObj*(arch: ARRAY OF CHAR; VAR s: ARRAY OF CHAR);
+    VAR local: ARRAY 64 OF CHAR;
+  BEGIN
+    local := "obj/"; Append(local, arch); Append(local, "/");
+    Join(local, s)
+  END RootObj;
 
   PROCEDURE Init;
     VAR s: ARRAY PathLen OF CHAR; n, i: LONGINT;

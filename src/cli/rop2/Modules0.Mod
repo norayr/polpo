@@ -42,8 +42,10 @@ MODULE Modules0;  (* RC 14.2.94 *)  (* object model *)  (** MIPS/RISC-V/ARMv7 dy
     res*: INTEGER;
     resMsg*: ARRAY 256 OF CHAR;
     objPath*: ARRAY 256 OF CHAR;  (** directory prefix of object files, ends with "/" *)
+    rootPath: ARRAY 256 OF CHAR;  (* object directory in the root, tried after objPath *)
     resMsgLen: LONGINT;
-    imported, importing, objname: ModuleName;
+    imported, objname: ModuleName;
+    importing: ARRAY 256 OF CHAR;  (* a module or object file name *)
 
   CONST
     done = 0;
@@ -288,7 +290,7 @@ END FindMod;
 
     PROCEDURE Block(tag: CHAR);
       VAR ch: CHAR;
-    BEGIN S.GET(f.adrpos, ch); INC(f.adrpos); IF ch # tag THEN importing := m.name; res := corruptedObjFile; ErrMsg(res) END
+    BEGIN S.GET(f.adrpos, ch); INC(f.adrpos); IF ch # tag THEN COPY(m.name, importing); res := corruptedObjFile; ErrMsg(res) END
     END Block;
     
     PROCEDURE ReadType(VAR tdesc: ADDRESS);
@@ -310,7 +312,7 @@ END FindMod;
       INC(root, (-root+2) MOD 4);  (* ADR(tdesc.a[root]) MOD 16 = 8 ! *)
       types[descnr].root := root;
       tdsize := (root + 1 (* recsize *) + nofptr + 1 (* sentinel *))*4;
-      IF Kernel.LargestAvailable() < tdsize THEN importing := name; res := notEnoughSpace; ErrMsg( res); RETURN END;
+      IF Kernel.LargestAvailable() < tdsize THEN COPY(name, importing); res := notEnoughSpace; ErrMsg( res); RETURN END;
       S.NEW(tdb, tdsize - 24 (* SysBlk header *));
       DEC(S.VAL(ADDRESS, tdb), 24);
       types[descnr].tdb := tdb; tdd := S.VAL(TDescDesc, tdb);
@@ -338,7 +340,7 @@ END FindMod;
       LOOP
         IF curexp = limexp THEN res := objNotFound; imported := modeStr[mode]; objname:=name; ErrMsg(res); EXIT END ;
         IF (curexp.name = name) & (curexp.mode = mode) THEN
-          IF curexp.fprint # fprint THEN res := fpMismatch; importing := name; imported := modeStr[mode]; ErrMsg(res) END ;
+          IF curexp.fprint # fprint THEN res := fpMismatch; COPY(name, importing); imported := modeStr[mode]; ErrMsg(res) END ;
           adr := curexp.adr;
           INC(S.VAL(LONGINT, curexp), SIZE(Export));
           EXIT
@@ -351,11 +353,11 @@ END FindMod;
       VAR save, td: LONGINT; tdd: TDescDesc;
     BEGIN save := curtd;  (* anonymous tdescs are unsorted *)
       LOOP
-        IF curtd = limtd THEN res := objNotFound; imported := modeStr[8]; importing:=name; importing:="fixme"; ErrMsg( res); EXIT END ;
+        IF curtd = limtd THEN res := objNotFound; imported := modeStr[8]; COPY(name, importing); importing:="fixme"; ErrMsg( res); EXIT END ;
         S.GET(curtd, td); S.GET(td - 4, tdd);
         IF tdd.name = name THEN
           IF (tdd.pvfprint = fprint) OR (fprint = 0) THEN adr := td; INC(curtd, 4); EXIT END ;
-          IF name # "" THEN res := fpMismatch; importing := name; imported := modeStr[8]; ErrMsg( res); EXIT END
+          IF name # "" THEN res := fpMismatch; COPY(name, importing); imported := modeStr[8]; ErrMsg( res); EXIT END
         END ;
         INC(curtd, 4)
       END ;
@@ -388,7 +390,7 @@ END FindMod;
               ELSE EXIT
               END
             END ;
-            IF l > r THEN importing := m.name; imported := mb.name;
+            IF l > r THEN COPY(m.name, importing); imported := mb.name;
               imported := modeStr[8]; importing:="fixme 2"; res := objNotFound; ErrMsg( res); RETURN
             END
           END ;
@@ -493,7 +495,7 @@ END FindMod;
     k := ((LONG(nofexp)*SIZE(Export) + 35) DIV 16 + (LONG(nofdesc)*4 + 35) DIV 16 +
       (LONG(nofcom)*SIZE(Cmd) + 35) DIV 16 + (LONG(nofptr)*4 + 35) DIV 16 + ((nofimp+1)*4 + 35) DIV 16 +
       (datasize + (-datasize) MOD 8 + consize + codesize*4 + 35) DIV 16 + (refsize + 35) DIV 16)*16;
-    IF Kernel.LargestAvailable() < k + 24 THEN importing := modname; m := NIL; res := notEnoughSpace; ErrMsg( res);  RETURN END ;
+    IF Kernel.LargestAvailable() < k + 24 THEN COPY(modname, importing); m := NIL; res := notEnoughSpace; ErrMsg( res);  RETURN END ;
     m.next := Kernel.modules; Kernel.modules := m;
     m.name := modname; (*m.init := FALSE;*) m.refcnt := -1;
     S.NEW(arrPtr, k); BuildModBlock;
@@ -559,7 +561,7 @@ END FindMod;
         | 8X: IF name = "" THEN ReadNum(f, link) ELSE link := fprint; fprint := 0 END ;
             FindTDesc(name, fprint, entry); data := TRUE
         END ;
-        IF res # done THEN importing := m.name; imported := m1.name;
+        IF res # done THEN COPY(m.name, importing); imported := m1.name;
           ErrMsg( res);
           Delete(m); m := NIL; RETURN
         END ;
@@ -586,18 +588,25 @@ END FindMod;
     res := done;
   END LoadModule;
 
+  (* fname := dir + name + ".Obj" *)
+  PROCEDURE ObjName(VAR dir, name, fname: ARRAY OF CHAR);
+    VAR i, j: LONGINT;
+  BEGIN
+    COPY(dir, fname);
+    j:=0;
+    WHILE fname[j] # 0X DO INC(j) END ;
+    i:=0;
+    WHILE name[i] # 0X DO fname[j]:= name[i]; INC(i); INC(j) END ;
+    fname[j] := "."; fname[j+1] := "O"; fname[j+2] := "b"; fname[j+3] := "j";fname[j+4] := 0X
+  END ObjName;
+
   PROCEDURE Load( name: ARRAY OF CHAR; VAR m: Module);
     VAR f: File; i, j, sp: LONGINT; fname: ARRAY 320 OF CHAR; tag: INTEGER; 
   BEGIN
     m := Kernel.modules; res := done;
     WHILE (m # NIL) & (name # m.name) DO m := m.next END ;
     IF m = NIL THEN  
-      COPY(objPath, fname);
-      j:=0;
-      WHILE fname[j] # 0X DO INC(j) END ;
-      i:=0;
-      WHILE name[i] # 0X DO fname[j]:= name[i]; INC(i); INC(j) END ;
-      fname[j] := "."; fname[j+1] := "O"; fname[j+2] := "b"; fname[j+3] := "j";fname[j+4] := 0X;
+      ObjName(objPath, name, fname);
 
 (* p.m.
       IF Kernel.nofiles >= Unix.OpenMax - 4 THEN
@@ -606,6 +615,10 @@ END FindMod;
       IF Kernel.nofiles >= Unix.OpenMax - 4 THEN importing := ""; res := tooManyFiles; ErrMsg( res) RETURN END ;
 *)
       f.fd:= Linux0.Openat0( Linux0.ATFDCWD, S.ADR(fname), 0, 0);
+      IF (f.fd < 3) & (rootPath # objPath) THEN
+        ObjName(rootPath, name, fname);
+        f.fd:= Linux0.Openat0( Linux0.ATFDCWD, S.ADR(fname), 0, 0)
+      END;
       IF f.fd<3 THEN
         COPY(fname, importing);  res := fileNotFound; ErrMsg(res); 
         RETURN;
@@ -665,7 +678,7 @@ END FindMod;
     m := Kernel.modules;
     WHILE (m # NIL) & (name # m.name) DO m := m.next END ;
     IF m = NIL THEN COPY(name, importing); res := moduleNotFound; ErrMsg( res)
-    ELSIF m.refcnt # 0 THEN importing := m.name; res := refCntNotZero; ErrMsg( res)
+    ELSIF m.refcnt # 0 THEN COPY(m.name, importing); res := refCntNotZero; ErrMsg( res)
     ELSE i := LEN(m.imports^);
       WHILE i > 1 DO DEC(i); m1 := S.VAL(Module, m.imports[i]); DEC(m1.refcnt) END ;
       IF all THEN i := LEN(m.imports^);
@@ -710,8 +723,8 @@ BEGIN  (* entry of boot file, must not return *)
 *)
 (*  Test;*)
   Kernel.Static:=FALSE;
-  IF Linux0.ARCH = "MIPS" THEN Root.Obj("mips", objPath)
-  ELSIF Linux0.ARCH = "RISC-V" THEN Root.Obj("riscv", objPath)
-  ELSE Root.Obj("armv7", objPath)
+  IF Linux0.ARCH = "MIPS" THEN Root.Obj("mips", objPath); Root.RootObj("mips", rootPath)
+  ELSIF Linux0.ARCH = "RISC-V" THEN Root.Obj("riscv", objPath); Root.RootObj("riscv", rootPath)
+  ELSE Root.Obj("armv7", objPath); Root.RootObj("armv7", rootPath)
   END
 END Modules0.

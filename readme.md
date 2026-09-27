@@ -82,6 +82,14 @@ And we don't know how xterm of your OS is compiled. We tested with xterm on Gent
 
 ### HiDPI screens: font scaling
 
+In short, there are two different things:
+
+* `System.SetFontScale 150` makes **all fonts on the screen** larger: every viewer,
+  menu and the log, at once (a broadcast). Documents are not changed. This is the
+  command for a HiDPI screen.
+* `Edit.ScaleFonts 50 *` changes the fonts **stored in one document**: the one in the
+  marked viewer, or files named after the number. See the next section.
+
 Screen fonts can be scaled, so that every text, including existing documents, is
 shown larger with the real Syntax and Oberon bitmap fonts. The scale is in percent:
 
@@ -99,6 +107,9 @@ of the same family if possible (at 200% the real Syntax20), else of the Oberon f
 Texts keep their font names, so documents are stored unchanged. `LineSpacing = 150` in
 the `System` section (percent of the font height, default 150) sets the spacing of lines
 in text viewers.
+
+How `Oberon.Text` is read, and how your own programs can keep settings there, is
+described in [texts.md](texts.md).
 
 ### Changing the fonts of a document
 
@@ -220,10 +231,19 @@ that is not positive, while the x86 compiler computes the floored result.
 
 `bin/<arch>/loksh` finds the polpo root from its own location (`/proc/self/exe`,
 also through symlinks and `PATH`), or from the environment variable `POLPO`. So it
-can be started from any directory: object files are loaded from `obj/<arch>/` in the
-current directory if it exists there, else from the root. `Files.Old` looks for a plain
-file name in the current directory, then in the root and its `share/`, `tools/` and
-`fonts/`, so `Oberon.Text`, `Edit.Open System.Tool` and fonts are found from anywhere.
+can be started from any directory. A project directory can have its own `obj/<arch>/`:
+the compiler then writes its objects there, and modules and symbol files that are not
+there are taken from the root's `obj/<arch>/`. `Files.Old` looks for a plain file name in
+the current directory, then in the root and its `share/`, `tools/` and `fonts/`, and for
+a relative path such as `obj/x86/Texts.Sym` in the current directory, then in the root. So
+`Oberon.Text`, `Edit.Open System.Tool` and fonts are found from anywhere.
+
+Files are saved where they were found: `Store` in the menu of `System.Tool` writes
+`tools/System.Tool` (and `tools/System.Tool.Bak`), unless there is a `System.Tool` in the
+current directory. A new name is created in the current directory; to make a local copy
+of a file from the root, store it as `./System.Tool`. A saved file replaces the old one
+instead of overwriting it, so a running Oberon keeps working while its object files are
+recompiled.
 
 ---
 

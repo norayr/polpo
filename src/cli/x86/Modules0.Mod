@@ -52,6 +52,7 @@ VAR
 (*  extension*: ARRAY 8 OF CHAR;  (** Extension of object files (non-portable) *)*)
   resMsgLen: LONGINT;
   objPath*: ARRAY 256 OF CHAR;
+  rootPath: ARRAY 256 OF CHAR;  (* object directory in the root, tried after objPath *)
 
   (** The res codes are listed in the table below.
     done = 0;
@@ -721,18 +722,24 @@ BEGIN (* LoadModule *)
   END
 END LoadModule;
 
+(* fname := dir + name + ".Obj" *)
+PROCEDURE ObjName(VAR dir, name, fname: ARRAY OF CHAR);
+  VAR i, j: INTEGER;
+BEGIN
+  i := 0; j := 0;
+  WHILE dir[i] # 0X DO fname[j] := dir[i]; INC(i); INC(j) END;
+  i := 0;
+  WHILE name[i] # 0X DO fname[j]:= name[i]; INC(i); INC(j) END ;
+  fname[j] := "."; fname[j+1] := "O"; fname[j+2] := "b"; fname[j+3] := "j"; fname[j+4] := 0X
+END ObjName;
+
 PROCEDURE Load(name: ARRAY OF CHAR; VAR m: Module);
-  VAR f: Files.File; R: Files.Rider; i, j: INTEGER; fname: ARRAY 320 OF CHAR; tag: CHAR;
+  VAR f: Files.File; R: Files.Rider; fname: ARRAY 320 OF CHAR; tag: CHAR;
 BEGIN
   m := FindMod(name); res := done; Clear;
   IF m = NIL THEN
-    i := 0; j := 0;
-    WHILE objPath[i] # 0X DO fname[j] := objPath[i]; INC(i); INC(j) END;
-    i := 0;
-    WHILE name[i] # 0X DO fname[j]:= name[i]; INC(i); INC(j) END ;
-    fname[j] := "."; fname[j+1] := "O"; fname[j+2] := "b"; fname[j+3] := "j"; fname[j+4] := 0X;
-
-    f := Files.Old(fname);
+    ObjName(objPath, name, fname); f := Files.Old(fname);
+    IF (f = NIL) & (rootPath # objPath) THEN ObjName(rootPath, name, fname); f := Files.Old(fname) END;
     IF f = NIL THEN
       COPY(fname, importing); res := fileNotFound; ErrMsg(res);
       RETURN
@@ -840,7 +847,7 @@ END InstallTermHandler;
 BEGIN
   trace := TRUE;
   Kernel.Static := FALSE;
-  Root.Obj("x86", objPath)
+  Root.Obj("x86", objPath); Root.RootObj("x86", rootPath)
 END Modules0.
 
 (** Remarks:

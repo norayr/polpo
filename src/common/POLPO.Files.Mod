@@ -156,26 +156,6 @@ BEGIN
   IF trace THEN Kernel.WriteLn END;
 END Cleanup;
 
-(** Creates a new file with the specified name. *)
-PROCEDURE New*(name: ARRAY OF CHAR): File;
-VAR f: File; res: INTEGER; newName: FileName;
-BEGIN
-  IF trace THEN Kernel.WriteString("Files.New "); Kernel.WriteString(name); Kernel.WriteLn END;
-  NEW(f);
-  Check( name, f.Name, f.dirfd, res);
-  IF res <=0 THEN
-    f.fd:=-1;
-(* MAP_SHARED=1, MAP_PRIVATE=2, MAP_ANONYMOUS=20H, 800@MIPS, RW=3 Anonymous files have to be private for mmap to work! *)
-    f.addr:=Linux0.Mmap20( 0, Linux0.PageSize, 3, Linux0.MAPPRIVATE+Linux0.MAPANONYMOUS, 0, 0);
-    IF (f.addr MOD 1000H) #0 THEN Kernel.WriteString("Files.New mmap failed"); Kernel.WriteHex(f.addr, 9); Kernel.WriteLn;END;
-    f.len:=0;
-    f.changed:=FALSE;
-    Kernel.RegisterObject( f, Cleanup, FALSE);
-    RETURN f;
-  END;
-  Kernel.WriteString("Files.New failed"); Kernel.WriteLn;
-  RETURN NIL;
-END New;
 
 (** Open an existing file. The same file descriptor is returned if a file is opened multiple times. *)
 (* Open name relative to directory dirfd, read-write or else read-only. *)
@@ -189,15 +169,20 @@ BEGIN
   RETURN fd
 END OpenRW;
 
-(* polpo: try a plain file name in the directories of searchPath (root, share/, tools/, fonts/);
+(* polpo: try a plain file name in the directories of searchPath (root, share/, tools/, fonts/),
+   a relative name with a directory part (obj/x86/Texts.Sym) in the root only;
    on success name becomes the path that was found. *)
 PROCEDURE OpenSearch(VAR name: ARRAY OF CHAR): LONGINT;
-VAR fd, i, j, k: LONGINT; path: FileName;
+VAR fd, i, j, k, n: LONGINT; path: FileName;
 BEGIN
+  IF name[0]="/" THEN RETURN -2 END;
   i:=0; WHILE (name[i]#0X) & (name[i]#"/") DO INC(i) END;
-  IF name[i]="/" THEN RETURN -2 END;
+  IF name[i]#"/" THEN n:=nofSearch
+  ELSIF Root.path#"" THEN n:=1  (* searchPath[0] is the root *)
+  ELSE RETURN -2
+  END;
   fd:=-2; k:=0;
-  WHILE (fd<=0) & (k<nofSearch) DO
+  WHILE (fd<=0) & (k<n) DO
     i:=0; WHILE searchPath[k][i]#0X DO path[i]:=searchPath[k][i]; INC(i) END;
     j:=0; WHILE (name[j]#0X) & (i<LEN(path)-1) DO path[i]:=name[j]; INC(i); INC(j) END;
     path[i]:=0X;
@@ -207,6 +192,45 @@ BEGIN
   END;
   RETURN fd
 END OpenSearch;
+
+(* polpo: a plain name that does not exist in the directory dirfd (or SYS) but is found in the
+   search path becomes the path found, so a file is written back where it was read from. *)
+PROCEDURE Locate(VAR name: ARRAY OF CHAR; VAR dirfd: LONGINT);
+VAR fd, r, i: LONGINT; path: FileName;
+BEGIN
+  i:=0; WHILE (name[i]#0X) & (name[i]#"/") DO INC(i) END;
+  IF (name[0]#0X) & (name[i]#"/") THEN
+    fd:=Linux0.Openat0( dirfd, SYSTEM.ADR(name[0]), Linux0.ORDonly, 0);
+    IF fd<=0 THEN fd:=Linux0.Openat0( sysfd, SYSTEM.ADR(name[0]), Linux0.ORDonly, 0) END;
+    IF fd>0 THEN r:=Linux0.Close0(fd)
+    ELSE
+      COPY(name, path); fd:=OpenSearch(path);
+      IF fd>0 THEN r:=Linux0.Close0(fd); COPY(path, name); dirfd:=Linux0.ATFDCWD END
+    END
+  END
+END Locate;
+
+(** Creates a new file with the specified name. *)
+PROCEDURE New*(name: ARRAY OF CHAR): File;
+VAR f: File; res: INTEGER; newName: FileName;
+BEGIN
+  IF trace THEN Kernel.WriteString("Files.New "); Kernel.WriteString(name); Kernel.WriteLn END;
+  NEW(f);
+  Check( name, f.Name, f.dirfd, res);
+  IF res=0 THEN Locate(f.Name, f.dirfd) END;
+  IF res <=0 THEN
+    f.fd:=-1;
+(* MAP_SHARED=1, MAP_PRIVATE=2, MAP_ANONYMOUS=20H, 800@MIPS, RW=3 Anonymous files have to be private for mmap to work! *)
+    f.addr:=Linux0.Mmap20( 0, Linux0.PageSize, 3, Linux0.MAPPRIVATE+Linux0.MAPANONYMOUS, 0, 0);
+    IF (f.addr MOD 1000H) #0 THEN Kernel.WriteString("Files.New mmap failed"); Kernel.WriteHex(f.addr, 9); Kernel.WriteLn;END;
+    f.len:=0;
+    f.changed:=FALSE;
+    Kernel.RegisterObject( f, Cleanup, FALSE);
+    RETURN f;
+  END;
+  Kernel.WriteString("Files.New failed"); Kernel.WriteLn;
+  RETURN NIL;
+END New;
 
 PROCEDURE Old*( name: ARRAY OF CHAR): File;
 VAR f: File; fd, r: LONGINT; status: Linux0.Status; res: INTEGER;
@@ -266,11 +290,15 @@ END ReleaseRead;
 (** Register a file created with New in the directory, replacing the previous file in the 
 directory with the same name. The file is automatically closed. *)
 PROCEDURE Register*(f: File);
+VAR res: LONGINT;
 BEGIN
   IF f# NIL THEN
     IF trace THEN Kernel.WriteString("Files.Register "); Kernel.WriteString(f.Name); Kernel.WriteLn END;
     IF f.Name#"" THEN
       IF f.fd=-1 THEN                                  (* flags were 242H for X86 *)
+        (* polpo: remove the old file first, so that processes that have it open or mapped
+           (object files of a running Oberon) keep the old contents *)
+        res:=Linux0.UnLinkat0( f.dirfd, SYSTEM.ADR(f.Name[0]), 0);
         f.fd:=Linux0.Openat0( f.dirfd, SYSTEM.ADR(f.Name[0]), Linux0.ORDWR+Linux0.OTRUNC+Linux0.OCREAT, SYSTEM.VAL( LONGINT, { 8, 7, 5, 2}));
         (*   ARM: was 240H; 200H: O_DSYNC, 40H: O_CREAT MIPS: 110H*)
         IF f.fd<=0 THEN
@@ -544,11 +572,22 @@ END Delete;
 
 (** Renames a file. res = 0 indicates success. *)
 PROCEDURE Rename*(old, new: ARRAY OF CHAR; VAR res: INTEGER);
-VAR olddirfd, newdirfd: LONGINT; 
+VAR olddirfd, newdirfd, i, j, k: LONGINT; oldname, newname, path: FileName;
 BEGIN
-  Check( old, old, olddirfd, res);
-  Check( new, new, newdirfd, res);
-  res:= SHORT( Linux0.Renameat0( olddirfd, SYSTEM.ADR( old[0]), newdirfd, SYSTEM.ADR( new[0]), 0));
+  Check( old, oldname, olddirfd, res);
+  Check( new, newname, newdirfd, res);
+  (* polpo: a file found in the search path is renamed there, System.Tool -> System.Tool.Bak *)
+  COPY(oldname, path); Locate(oldname, olddirfd);
+  IF oldname#path THEN
+    i:=0; WHILE (newname[i]#0X) & (newname[i]#"/") DO INC(i) END;
+    IF newname[i]#"/" THEN
+      k:=-1; i:=0; WHILE oldname[i]#0X DO IF oldname[i]="/" THEN k:=i END; INC(i) END;
+      i:=0; WHILE i<=k DO path[i]:=oldname[i]; INC(i) END;
+      j:=0; WHILE (newname[j]#0X) & (i<LEN(path)-1) DO path[i]:=newname[j]; INC(i); INC(j) END;
+      path[i]:=0X; COPY(path, newname); newdirfd:=Linux0.ATFDCWD
+    END
+  END;
+  res:= SHORT( Linux0.Renameat0( olddirfd, SYSTEM.ADR( oldname[0]), newdirfd, SYSTEM.ADR( newname[0]), 0));
 END Rename;
 
 (** Returns the full name of a file. *)

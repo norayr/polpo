@@ -55,6 +55,7 @@ VAR
   res*: INTEGER;  (** Error code for ThisMod and ThisCommand. res = 0 indicates success. *)
   resMsg*: ARRAY 256 OF CHAR;  (** Explanation of res, if res # 0 *)
   objPath*: ARRAY 256 OF CHAR;  (** directory prefix of object files, ends with "/" *)
+  rootPath: ARRAY 256 OF CHAR;  (* object directory in the root, tried after objPath *)
   
   (** The res codes are listed in the table below.
     done = 0;
@@ -404,16 +405,23 @@ BEGIN (* LoadModule *)
   END
 END LoadModule;
 
+(* fname := dir + name + ".Obj" *)
+PROCEDURE ObjName(VAR dir, name, fname: ARRAY OF CHAR);
+  VAR i, j: INTEGER;
+BEGIN
+  j:=0; WHILE dir[j] # 0X DO fname[j]:= dir[j]; INC(j) END;
+  i:=0;
+  WHILE name[i] # 0X DO fname[j]:= name[i]; INC(i); INC(j) END ;
+  fname[j] := "."; fname[j+1] := "O"; fname[j+2] := "b"; fname[j+3] := "j"; fname[j+4] := 0X
+END ObjName;
+
 PROCEDURE Load (name: ARRAY OF CHAR; VAR m: Module);
 CONST PROTREAD=1; PROTWRITE=2;
 VAR f: File; i, j: INTEGER; fname: ARRAY 320 OF CHAR; tag: CHAR; res2: LONGINT;
 BEGIN
   Find(name, m);  res := done;  resMsg := "";
   IF m = NIL THEN
-    j:=0; WHILE objPath[j] # 0X DO fname[j]:= objPath[j]; INC(j) END;
-    i:=0;
-    WHILE name[i] # 0X DO fname[j]:= name[i]; INC(i); INC(j) END ;
-    fname[j] := "."; fname[j+1] := "O"; fname[j+2] := "b"; fname[j+3] := "j"; fname[j+4] := 0X;
+    ObjName(objPath, name, fname);
 (*
     i := 0;  j := 0;
     j := 0;
@@ -423,6 +431,10 @@ BEGIN
     fname[i] := "."; fname[i+1] := "O"; fname[i+2] := "b"; fname[i+3] := "j"; fname[i+4] := 0X;
 *)
     f.fd:= Linux0.Openat0(Linux0.ATFDCWD, SYSTEM.ADR(fname), 0, 0);
+    IF (f.fd <= 0) & (rootPath # objPath) THEN
+      ObjName(rootPath, name, fname);
+      f.fd:= Linux0.Openat0(Linux0.ATFDCWD, SYSTEM.ADR(fname), 0, 0)
+    END;
     IF f.fd <= 0 THEN
       COPY(name, importing);  res := fileNotFound; ErrMsg(res);
       RETURN
@@ -543,7 +555,7 @@ END InstallTermHandler;
 BEGIN
   Kernel.Static:=FALSE;
   modLoadAddr:=Kernel.dynModBase;
-  Root.Obj("arm", objPath)
+  Root.Obj("arm", objPath); Root.RootObj("arm", rootPath)
 END Modules0.
 
 (** Remarks:
