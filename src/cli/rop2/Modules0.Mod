@@ -89,6 +89,23 @@ BEGIN i := 0;
 END ReadString;
 
 (* From Files.  Reads a number in compressed variable length notation using the minimum amount of bytes. *)
+(* polpo: object file fields are at any byte offset; read them bytewise, little endian,
+   so that no misaligned word or halfword load is needed (MIPS traps on those). *)
+PROCEDURE GetLInt(VAR r: File; VAR x: LONGINT);
+VAR b0, b1, b2, b3: CHAR;
+BEGIN
+  S.GET(r.adrpos, b0); S.GET(r.adrpos+1, b1); S.GET(r.adrpos+2, b2); S.GET(r.adrpos+3, b3); INC(r.adrpos, 4);
+  x := ORD(b0) + S.LSH(LONG(ORD(b1)), 8) + S.LSH(LONG(ORD(b2)), 16) + S.LSH(LONG(ORD(b3)), 24)
+END GetLInt;
+
+PROCEDURE GetInt(VAR r: File; VAR x: INTEGER);
+VAR b0, b1: CHAR; v: LONGINT;
+BEGIN
+  S.GET(r.adrpos, b0); S.GET(r.adrpos+1, b1); INC(r.adrpos, 2);
+  v := ORD(b0) + 256*LONG(ORD(b1)); IF v >= 8000H THEN DEC(v, 10000H) END;
+  x := SHORT(v)
+END GetInt;
+
 PROCEDURE ReadNum(VAR r: File; VAR x: LONGINT);
 VAR ch: CHAR; n: INTEGER; y: LONGINT;
 BEGIN
@@ -447,8 +464,8 @@ END FindMod;
 
   BEGIN  (* m = NIL, res = done *)
   (* HeaderBlk *)
-    S.GET(f.adrpos, refsize); INC(f.adrpos, 4); S.GET(f.adrpos, nofexp); INC(f.adrpos, 2); S.GET(f.adrpos, nofdesc); INC(f.adrpos, 2);
-    S.GET(f.adrpos, nofcom); INC(f.adrpos, 2); S.GET(f.adrpos, nofptr); INC(f.adrpos, 2);
+    GetLInt(f, refsize); GetInt(f, nofexp); GetInt(f, nofdesc);
+    GetInt(f, nofcom); GetInt(f, nofptr);
     ReadNum(f, nofimp); ReadNum(f, newreclink); ReadNum(f, newsyslink);
     ReadNum(f, newarrlink); ReadNum(f, datalink); ReadNum(f, datasize); ReadNum(f, consize);
     ReadNum(f, codesize); ReadString(f, modname);
@@ -520,7 +537,7 @@ END FindMod;
   (* CodeBlk *)
     Block(88X);
     i := 0; t := m.sb;
-    WHILE i < codesize DO S.GET(f.adrpos, k); INC(f.adrpos, 4); S.PUT(t, k); INC(t, 4); INC(i) END ;
+    WHILE i < codesize DO GetLInt(f, k); S.PUT(t, k); INC(t, 4); INC(i) END ;
     WHILE linknr > 0 DO DEC(linknr); Linux0.Fixup(m.sb, links[linknr].entry, links[linknr].link, FALSE) END ;
     Linux0.Fixup(m.sb, Kernel.runtime[0], newreclink, FALSE);  (* Kernel already loaded *)
     Linux0.Fixup(m.sb, Kernel.runtime[1], newsyslink, FALSE);
@@ -693,5 +710,8 @@ BEGIN  (* entry of boot file, must not return *)
 *)
 (*  Test;*)
   Kernel.Static:=FALSE;
-  COPY("obj/riscv/", objPath)
+  IF Linux0.ARCH = "MIPS" THEN COPY("obj/mips/", objPath)
+  ELSIF Linux0.ARCH = "RISC-V" THEN COPY("obj/riscv/", objPath)
+  ELSE COPY("obj/armv7/", objPath)
+  END
 END Modules0.

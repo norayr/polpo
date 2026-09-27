@@ -1,12 +1,12 @@
-MODULE linker;  (** RISC-V: linker.Link is the RISC-V boot linker (see rvlinker) *)
-  IMPORT rvlinker;
+MODULE linker;  (** RISC-V: linker.Link is the RISC-V boot linker (see rlinker) *)
+  IMPORT rlinker;
 
   PROCEDURE Link*;
-  BEGIN rvlinker.Link
+  BEGIN rlinker.Link
   END Link;
 
   PROCEDURE Help*;
-  BEGIN rvlinker.Help
+  BEGIN rlinker.Help
   END Help;
 
 END linker.

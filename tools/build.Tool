@@ -93,14 +93,18 @@ compiler.Compile /s src/desktop/arm/ACompiler.Mod
 compiler.Compile /s src/desktop/arm/ADecoder.Mod
 compiler.Compile /s src/desktop/arm/ABrowser.Mod
 
-# RISC-V cross tools in the desktop (RISC-V toolchain itself: make riscv)
-compiler.Compile /s src/cli/riscv/ROPM.Mod
-compiler.Compile /s src/cli/riscv/ROPS.Mod
-compiler.Compile /s src/cli/riscv/ROPT.Mod
-compiler.Compile /s src/cli/riscv/ROPB.Mod
-compiler.Compile /s src/cli/riscv/ROPP.Mod
+# MIPS and RISC-V cross tools in the desktop (toolchains themselves: make mips, make riscv)
+compiler.Compile /s src/cli/rop2/ROPM.Mod
+compiler.Compile /s src/cli/rop2/ROPS.Mod
+compiler.Compile /s src/cli/rop2/ROPT.Mod
+compiler.Compile /s src/cli/rop2/ROPB.Mod
+compiler.Compile /s src/cli/rop2/ROPP.Mod
 compiler.Compile /s src/cli/riscv/VOPL.Mod
 compiler.Compile /s src/cli/riscv/VOPC.Mod
 compiler.Compile /s src/cli/riscv/VOPV.Mod
-compiler.Compile /s src/desktop/riscv/RCompiler.Mod
+compiler.Compile /s src/desktop/rop2/RCompiler.Mod
 compiler.Compile /s src/desktop/riscv/VDecoder.Mod
+compiler.Compile /s src/cli/mips/MOPL.Mod
+compiler.Compile /s src/cli/mips/MOPC.Mod
+compiler.Compile /s src/cli/mips/MOPV.Mod
+compiler.Compile /s src/desktop/mips/M2Decoder.Mod

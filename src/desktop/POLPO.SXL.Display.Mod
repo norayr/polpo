@@ -1037,7 +1037,7 @@ END GetDim;
 
 (** Define a new pattern. *)
 PROCEDURE NewPattern*(w, h: LONGINT; VAR image: ARRAY OF SET): Pattern;
-VAR len, src, dest, i: LONGINT;  pl: List;
+VAR len, src, dest, i, j, row: LONGINT;  pl: List;
 BEGIN
   len := (w+7) DIV 8;
   NEW(pl);
@@ -1046,7 +1046,13 @@ BEGIN
   pl.data[3]:=CHR(h);
   dest := SYSTEM.ADR(pl.data[4]);
   i := 0;
-  WHILE i < h DO SYSTEM.PUT(dest, image[i]); INC(dest, len);  INC(i) END;
+  (* store len bytes per row, low byte first: no misaligned word stores (MIPS traps
+     on them) and no overrun past the end of pl.data *)
+  WHILE i < h DO
+    row := SYSTEM.VAL(LONGINT, image[i]);
+    FOR j := 0 TO len-1 DO SYSTEM.PUT(dest+j, CHR(SYSTEM.LSH(row, -8*j) MOD 100H)) END;
+    INC(dest, len);  INC(i)
+  END;
   pl.next := pattern;  pattern := pl;  (* put in list to avoid GC *)
   RETURN SYSTEM.ADR(pl.data[2])
 END NewPattern;

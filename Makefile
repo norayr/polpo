@@ -19,6 +19,12 @@ else
 RISCV = qemu-riscv32 bin/riscv/loksh
 endif
 
+ifneq ($(filter mips,$(HOSTARCH)),)
+MIPS = bin/mips/loksh
+else
+MIPS = qemu-mipsel bin/mips/loksh
+endif
+
 # ---- x86 ----
 
 fast:
@@ -65,7 +71,7 @@ arm-x11:
 
 # cross compile the RISC-V system on x86
 riscv:
-		$(X86) < tools/riscv-cross.Tool
+		$(X86) < tools/rop2-cross.Tool
 		$(X86) < tools/riscv.Tool
 		mv bin/riscv/loksh.new bin/riscv/loksh
 
@@ -81,4 +87,24 @@ riscv-run:
 riscv-shell:
 		$(RISCV)
 
-.PHONY: fast sixel x11 arm arm-native arm-run arm-shell arm-sixel arm-x11 riscv riscv-native riscv-run riscv-shell
+# ---- MIPS (32-bit little-endian) ----
+
+# cross compile the MIPS system on x86
+mips:
+		$(X86) < tools/rop2-cross.Tool
+		$(X86) < tools/mips.Tool
+		mv bin/mips/loksh.new bin/mips/loksh
+
+# build the MIPS system with the MIPS compiler: natively on MIPS, under qemu-mipsel elsewhere
+mips-native:
+		$(MIPS) < tools/mips.Tool
+		mv bin/mips/loksh.new bin/mips/loksh
+
+# start the MIPS desktop / console (qemu-mipsel unless this machine is MIPS)
+mips-run:
+		$(MIPS) System.Init
+
+mips-shell:
+		$(MIPS)
+
+.PHONY: fast sixel x11 arm arm-native arm-run arm-shell arm-sixel arm-x11 riscv riscv-native riscv-run riscv-shell mips mips-native mips-run mips-shell

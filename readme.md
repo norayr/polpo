@@ -124,21 +124,40 @@ make riscv-run      # start the RISC-V desktop (System.Init); on x86 through qem
 make riscv-shell    # RISC-V console
 ```
 
-`make riscv` runs `tools/riscv-cross.Tool` (the x86-hosted `rvcompiler` and
-`rvlinker`) and then `tools/riscv.Tool`. On RISC-V, `compiler.Compile` and
+`make riscv` runs `tools/rop2-cross.Tool` (the x86-hosted `rcompiler`, `rvcompiler`
+and `rlinker`) and then `tools/riscv.Tool`. On RISC-V, `compiler.Compile` and
 `linker.Link` are the RISC-V compiler and boot linker. The runtime uses the
 Linux RV32 system calls (64-bit time, statx).
+
+### MIPS
+
+polpo runs on 32-bit little-endian MIPS (mipsel) Linux, with the same ROP2
+compiler family and runtime as RISC-V and the MIPS back end `MOPL`..`MOPV`.
+Object files are in `obj/mips/`, the static executable is `bin/mips/loksh`.
+
+```
+make mips           # on x86: cross compile the MIPS system
+make mips-native    # rebuild it with the MIPS compiler (on x86: under qemu-mipsel)
+make mips-run       # start the MIPS desktop (System.Init); on x86 through qemu-mipsel
+make mips-shell     # MIPS console
+```
+
+On MIPS, `compiler.Compile` and `linker.Link` are the MIPS compiler and boot
+linker. The compiler avoids misaligned word accesses (it uses LWL/LWR and
+SWL/SWR where alignment is unknown), so no kernel fixups are needed.
 
 ### Layout
 
 * `bin/<arch>/loksh` - static executables; run them from the polpo directory
 * `obj/<arch>/` - object files loaded by `bin/<arch>/loksh`
 * `src/cli` - console modules shared by all architectures; `src/cli/<arch>` - runtime
-  (Linux0, Kernel, Modules0), compiler and linker of that architecture
+  (Linux0, Kernel, Modules0), compiler and linker of that architecture; `src/cli/rop2` -
+  the ROP2 compiler front end, runtime (Kernel, Modules0) and boot linker shared by MIPS
+  and RISC-V
 * `src/common` - modules shared by console and desktop (Files, Texts0, Oberon0, ...)
 * `src/desktop` - desktop modules shared by all architectures; `src/desktop/<arch>` -
   architecture dependent desktop modules (XCompiler, ACompiler, RCompiler, decoders, browsers, System on RISC-V)
-* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool`, `arm.Tool`, `riscv-cross.Tool` and `riscv.Tool`
+* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool`, `arm.Tool`, `rop2-cross.Tool`, `riscv.Tool` and `mips.Tool`
 * `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
 * `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
 

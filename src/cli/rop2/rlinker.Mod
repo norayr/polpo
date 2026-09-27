@@ -1,4 +1,4 @@
-MODULE rvlinker;  (* RC 2.12.93 *)  (* object model *)  (** command-line RISC-V/MIPS/ARMv7 boot linker *)
+MODULE rlinker;  (* RC 2.12.93 *)  (* object model *)  (** command-line MIPS/RISC-V/ARMv7 boot linker *)
 
 (* p.m.
   2014-11-09  first version, removed skip Kernel.modules initialisized hardcoded
@@ -17,7 +17,8 @@ MODULE rvlinker;  (* RC 2.12.93 *)  (* object model *)  (** command-line RISC-V/
   BootLinker does not assign procedure variables inside static core correctly!??
 
   Warning: softDiv hard coded! 
-  polpo: console frontend (was RBootLinker); object directory dir, default obj/riscv/.
+  polpo: console frontend (was RBootLinker); target and object directory from options,
+    by default the host architecture (Linux0.ARCH) and obj/<arch>/.
     
 *)
   IMPORT S := SYSTEM, Linux0, Files, Oberon := Oberon0, Texts := texts, Con := out;
@@ -1052,24 +1053,28 @@ END MkELF64hdr;
   PROCEDURE Help*;
   BEGIN
     Con.String("USAGE:"); Con.Ln;
-    Con.String("  rvlinker.Link [/e] [/m | /a] [/Pdir/] image Module0 Module1 ..."); Con.Ln;
+    Con.String("  rlinker.Link [/e] [/v | /m | /a] [/Pdir/] image Module0 Module1 ..."); Con.Ln;
     Con.Ln;
-    Con.String("Links the modules, listed in import order, from dir (default obj/riscv/)"); Con.Ln;
+    Con.String("Links the modules, listed in import order, from dir (default obj/<arch>/)"); Con.Ln;
     Con.String("into the static executable image; module bodies run in that order."); Con.Ln;
     Con.String("  /e       show module body addresses"); Con.Ln;
-    Con.String("  /m       MIPS instead of RISC-V (dir default obj/mips/)"); Con.Ln;
-    Con.String("  /a       ARMv7 instead of RISC-V (dir default obj/armv7/)"); Con.Ln;
+    Con.String("  /v       RISC-V (obj/riscv/)"); Con.Ln;
+    Con.String("  /m       MIPS (obj/mips/)"); Con.Ln;
+    Con.String("  /a       ARMv7 (obj/armv7/)"); Con.Ln;
+    Con.String("Without /v, /m, /a the target is the host architecture."); Con.Ln;
     Con.String("  /Pdir/   object file directory"); Con.Ln
   END Help;
 
   PROCEDURE Link*;
     VAR bootName: Name; s: Texts.Scanner; m: Module; pos: LONGINT; i: INTEGER; dirSet: BOOLEAN;
   BEGIN
-    pos := Oberon.Log.len; arch := RISCV; b64 := FALSE; showEntries := FALSE;
+    pos := Oberon.Log.len; b64 := FALSE; showEntries := FALSE;
+    IF Linux0.ARCH = "MIPS" THEN arch := MIPS ELSIF Linux0.ARCH = "ARMv7" THEN arch := ARMv7 ELSE arch := RISCV END;
     dirSet := FALSE; bootName[0] := 0X;
     Texts.OpenScanner(s, Oberon.Par.text, Oberon.Par.pos); Texts.Scan(s);
     WHILE (s.class = Texts.Name) & ((s.s[0] = "/") OR (s.s[0] = "\")) DO
       IF s.s[1] = "e" THEN showEntries := TRUE
+      ELSIF s.s[1] = "v" THEN arch := RISCV
       ELSIF s.s[1] = "m" THEN arch := MIPS
       ELSIF s.s[1] = "a" THEN arch := ARMv7
       ELSIF s.s[1] = "P" THEN
@@ -1118,7 +1123,7 @@ BEGIN
   archs[ ARMv7]:="armv7"; tags[ARMv7]:= 36FBH;
   archs[ ARMv8]:="armv8"; tags[ ARMv8]:= 36FCH (*36FBH *);
   archs[ TEST]:= "mipst"; tags[TEST]:= 36FAH;
-END rvlinker.
+END rlinker.
 
 MIPSBootLinker.Link [heapAdr] bootFileName := modName0 modName1 ... ~
 
