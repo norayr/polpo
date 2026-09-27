@@ -16,7 +16,7 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
     replace = Display.replace; paint = Display.paint; invert = Display.invert;
     extend = Display.extend; reduce = Display.reduce;
 
-  StandardMenu = "System.Close System.Copy System.Grow Edit.Search Edit.Store";
+  StandardMenu = "System.Close System.Copy System.Grow Edit.Search Edit.Store Edit.StorePlain";
   LogMenu = "System.Clear Edit.Locate Edit.Search Edit.Store";
   OpenCmd = "Edit.Open";
   
@@ -74,6 +74,11 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
     BoxPat: ARRAY 12 OF SET;
     hintPos: LONGINT;
     saved: Oberon.CaretMsg;
+    (* polpo: keyboard editing *)
+    anchorF: Frame; anchorPos: LONGINT;  (* start of a selection made with Shift and the cursor keys *)
+    goalF: Frame; goalX: INTEGER;  (* column kept by consecutive up and down moves *)
+    clipBuf: Texts.Buffer;  (* text copied with Ctrl+C or cut with Ctrl+X, with its looks *)
+    hiddenF: Frame; hiddenPos: LONGINT;  (* the caret of hiddenF, scrolled out of view *)
 
   PROCEDURE Min (i, j: INTEGER): INTEGER;
   BEGIN IF i >= j THEN RETURN j ELSE RETURN i END
@@ -280,7 +285,7 @@ END MulDiv;
     Mark(F, 1)
   END Reduce;
 
-  PROCEDURE Show* (F: Frame; pos: LONGINT);
+  PROCEDURE ShowOrg (F: Frame; pos: LONGINT);
     VAR R: Texts.Reader; L: Line;
       org: LONGINT; curY, botY, Y0: INTEGER;
   BEGIN
@@ -322,6 +327,27 @@ END MulDiv;
           Mark(F, 1)
         END
       END
+    END
+  END ShowOrg;
+
+  PROCEDURE ^LocatePos (F: Frame; pos: LONGINT; VAR loc: Location);
+  PROCEDURE ^FlipSelection (F: Frame; VAR beg, end: Location);
+
+  (* polpo: loc for the selection boundary pos, which may be outside the lines shown:
+     drawn at the nearest visible place, the position is kept *)
+  PROCEDURE SelLoc (F: Frame; pos: LONGINT; VAR loc: Location);
+  BEGIN LocatePos(F, pos, loc); loc.pos := pos
+  END SelLoc;
+
+  (** Show the text from pos on; a selection stays selected (polpo) *)
+  PROCEDURE Show* (F: Frame; pos: LONGINT);
+    VAR keep: BOOLEAN; beg, end: LONGINT;
+  BEGIN
+    keep := F.sel # 0;
+    IF keep THEN beg := F.selbeg.pos; end := F.selend.pos; FlipSelection(F, F.selbeg, F.selend); F.sel := 0 END;
+    ShowOrg(F, pos);
+    IF keep THEN
+      SelLoc(F, beg, F.selbeg); SelLoc(F, end, F.selend); FlipSelection(F, F.selbeg, F.selend); F.sel := 1
     END
   END Show;
 
@@ -457,11 +483,12 @@ END MulDiv;
 
   PROCEDURE SetCaret* (F: Frame; pos: LONGINT);
   BEGIN
+    IF hiddenF = F THEN hiddenF := NIL END;
     IF F.car # 0 THEN FlipCaret(F); F.car := 0 END;
     LocatePos(F, pos, F.carloc);
     IF F.carloc.pos = pos THEN FlipCaret(F); F.car := 1
     ELSE
-      RemoveMarks(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+      Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
       Show(F, pos - 100); LocatePos(F, pos, F.carloc);
       IF F.carloc.pos = pos THEN FlipCaret(F); F.car := 1 END
     END
@@ -509,16 +536,37 @@ END MulDiv;
   PROCEDURE SetSelection* (F: Frame; beg, end: LONGINT);
   BEGIN
     IF end <= beg THEN end := NextPos(F.text, beg) END;
-    IF F.sel # 0 THEN FlipSelection(F, F.selbeg, F.selend) END;
-    LocatePos(F, beg, F.selbeg);
-    IF F.selbeg.pos # beg THEN Show(F, beg); LocatePos(F, beg, F.selbeg) END;
-    LocatePos(F, end, F.selend);
+    IF F.sel # 0 THEN FlipSelection(F, F.selbeg, F.selend); F.sel := 0 END;
+    LocatePos(F, beg, F.selbeg); LocatePos(F, end, F.selend);
+    IF (F.selbeg.pos # beg) & (F.selend.pos # end) THEN Show(F, beg) END;  (* polpo: nothing of it visible *)
+    SelLoc(F, beg, F.selbeg); SelLoc(F, end, F.selend);
     FlipSelection(F, F.selbeg, F.selend); F.time := Input.Time(); F.sel := 1;
   END SetSelection;
 
   PROCEDURE TrackSelection* (F: Frame; X, Y: INTEGER; VAR keysum: SET);
-    VAR loc: Location; modKeys, keys: SET; M: Oberon.SelectMsg;
+    VAR loc: Location; modKeys, keys: SET; M: Oberon.SelectMsg; b, e, p, nb, ne: LONGINT;
   BEGIN
+    Input.KeyState(modKeys);
+    IF (Input.SHIFT IN modKeys) & (F.trailer.next # F.trailer) & ((F.sel # 0) OR (F.car # 0) OR (hiddenF = F)) THEN
+      (* polpo: extend the selection to the mouse, or select from the caret, like xterm *)
+      IF F.sel # 0 THEN b := F.selbeg.pos; e := F.selend.pos
+      ELSIF F.car # 0 THEN b := F.carloc.pos; e := b
+      ELSE b := hiddenPos; e := b
+      END;
+      anchorF := NIL; keysum := {};
+      REPEAT
+        Input.Mouse(keys, X, Y); keysum := keysum + keys;
+        Oberon.DrawCursor(Oberon.Mouse, Oberon.Mouse.marker, X, Y);
+        LocateChar(F, X - F.X, Y - F.Y, loc); p := loc.pos;
+        IF p < b THEN nb := p; ne := e ELSE nb := b; ne := NextPos(F.text, p); IF ne < e THEN ne := e END END;
+        IF (F.sel = 0) OR (nb # F.selbeg.pos) OR (ne # F.selend.pos) THEN
+          IF F.sel # 0 THEN FlipSelection(F, F.selbeg, F.selend) END;
+          SelLoc(F, nb, F.selbeg); SelLoc(F, ne, F.selend); FlipSelection(F, F.selbeg, F.selend); F.sel := 1
+        END
+      UNTIL keys = {};
+      F.time := Input.Time(); F.sel := 1;
+      RETURN
+    END;
       IF F.trailer.next # F.trailer THEN
       IF F.sel # 0 THEN FlipSelection(F, F.selbeg, F.selend) END;
       LocateChar(F, X - F.X, Y - F.Y, loc);
@@ -668,22 +716,165 @@ END MulDiv;
     END
   END Call;
 
+  (* ----- polpo: keyboard editing ----- *)
+
+  PROCEDURE LineStart (T: Texts.Text; pos: LONGINT): LONGINT;
+    VAR R: Texts.Reader; c: CHAR;
+  BEGIN
+    WHILE pos > 0 DO
+      Texts.OpenReader(R, T, pos - 1); Texts.Read(R, c);
+      IF c = CR THEN RETURN pos END;
+      DEC(pos)
+    END;
+    RETURN 0
+  END LineStart;
+
+  PROCEDURE LineEnd (T: Texts.Text; pos: LONGINT): LONGINT;
+    VAR R: Texts.Reader; c: CHAR;
+  BEGIN
+    Texts.OpenReader(R, T, pos); Texts.Read(R, c);
+    WHILE ~R.eot & (c # CR) DO INC(pos); Texts.Read(R, c) END;
+    RETURN pos
+  END LineEnd;
+
+  PROCEDURE Lines (F: Frame): INTEGER;  (* number of lines shown *)
+    VAR L: Line; n: INTEGER;
+  BEGIN
+    n := 0; L := F.trailer.next;
+    WHILE L # F.trailer DO INC(n); L := L.next END;
+    RETURN n
+  END Lines;
+
+  (* move the caret to pos; with shift the selection runs from the anchor to pos *)
+  PROCEDURE MoveCaret (F: Frame; pos: LONGINT; shift: BOOLEAN);
+    VAR old: LONGINT;
+  BEGIN
+    old := F.carloc.pos;
+    IF pos < 0 THEN pos := 0 ELSIF pos > F.text.len THEN pos := F.text.len END;
+    IF shift THEN
+      IF (anchorF # F) OR (F.sel = 0) THEN anchorF := F; anchorPos := old END
+    ELSIF anchorF = F THEN RemoveSelection(F); anchorF := NIL
+    END;
+    RemoveCaret(F); SetCaret(F, pos);
+    IF shift THEN
+      IF pos < anchorPos THEN SetSelection(F, pos, anchorPos)
+      ELSIF pos > anchorPos THEN SetSelection(F, anchorPos, pos)
+      ELSE RemoveSelection(F)
+      END
+    END
+  END MoveCaret;
+
+  (* the caret one line up (dir = 1) or down (dir = -1), in the same column; scrolls at the edges *)
+  PROCEDURE MoveLine (F: Frame; dir: INTEGER; shift: BOOLEAN);
+    VAR loc: Location; x, y: INTEGER; pos, org: LONGINT;
+  BEGIN
+    IF goalF # F THEN goalF := F; goalX := F.carloc.x END;
+    x := goalX; y := F.carloc.y + dir * lsp;
+    IF (dir > 0) & (F.carloc.lin = F.trailer.next) THEN  (* first line shown *)
+      IF F.org = 0 THEN MoveCaret(F, 0, shift); RETURN END;
+      org := LineStart(F.text, F.org - 1); pos := F.carloc.pos;
+      RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+      Show(F, org); LocatePos(F, pos, F.carloc); y := F.carloc.y + lsp
+    ELSIF (dir < 0) & (F.carloc.lin.next = F.trailer) THEN  (* last line shown *)
+      IF F.carloc.lin.eot THEN MoveCaret(F, F.text.len, shift); RETURN END;
+      pos := F.carloc.pos;
+      RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+      Show(F, F.org + F.trailer.next.len); LocatePos(F, pos, F.carloc); y := F.carloc.y - lsp
+    END;
+    LocateChar(F, x, y, loc);
+    MoveCaret(F, loc.pos, shift)
+  END MoveLine;
+
+  (* one page up (dir = 1) or down (dir = -1), the caret stays on its row *)
+  PROCEDURE MovePage (F: Frame; dir: INTEGER; shift: BOOLEAN);
+    VAR loc: Location; n: INTEGER; org: LONGINT; x, y: INTEGER; L: Line;
+  BEGIN
+    x := F.carloc.x; y := F.carloc.y; n := Lines(F) - 1; IF n < 1 THEN n := 1 END;
+    org := F.org;
+    IF dir > 0 THEN
+      IF org = 0 THEN MoveCaret(F, 0, shift); RETURN END;
+      WHILE (n > 0) & (org > 0) DO org := LineStart(F.text, org - 1); DEC(n) END
+    ELSE
+      L := F.trailer.next;
+      WHILE (n > 0) & (L.next # F.trailer) DO org := org + L.len; L := L.next; DEC(n) END;
+      IF L.eot & (org = F.org) THEN MoveCaret(F, F.text.len, shift); RETURN END
+    END;
+    RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+    Show(F, org); LocateChar(F, x, y, loc);
+    MoveCaret(F, loc.pos, shift)
+  END MovePage;
+
+  (* Ctrl+C: copy the selection to the clipboard, and offer it to other programs *)
+  PROCEDURE CopySelection (): BOOLEAN;
+    VAR text: Texts.Text; beg, end, time, i: LONGINT; R: Texts.Reader; s: POINTER TO ARRAY OF CHAR;
+  BEGIN
+    Oberon.GetSelection(text, beg, end, time);
+    IF (time < 0) OR (end <= beg) THEN RETURN FALSE END;
+    NEW(clipBuf); Texts.OpenBuf(clipBuf); Texts.Save(text, beg, end, clipBuf);
+    NEW(s, end - beg); Texts.OpenReader(R, text, beg); i := 0;
+    WHILE i < end - beg DO
+      Texts.Read(R, s[i]); IF s[i] = CR THEN s[i] := 0AX END; INC(i)
+    END;
+    Input.SetClipboard(s^, end - beg);
+    RETURN TRUE
+  END CopySelection;
+
+  (* Ctrl+V: insert the clipboard at the caret; text copied in another program comes from X *)
+  PROCEDURE PasteClipboard (F: Frame);
+    VAR buf: Texts.Buffer; pos: LONGINT;
+  BEGIN
+    IF Input.RequestClipboard() THEN RETURN END;  (* arrives later as typed characters *)
+    IF clipBuf # NIL THEN
+      NEW(buf); Texts.OpenBuf(buf); Texts.Copy(clipBuf, buf);
+      pos := F.carloc.pos + buf.len;
+      Texts.Insert(F.text, F.carloc.pos, buf); SetCaret(F, pos)
+    END
+  END PasteClipboard;
+
   PROCEDURE Write* (F: Frame; ch: CHAR; lib: Objects.Library; col, voff: SHORTINT);
-  VAR pos: LONGINT;
+  VAR pos, beg, end, time: LONGINT; keys: SET; shift, ctrl: BOOLEAN; text: Texts.Text;
   BEGIN (*F.car # 0*)
-    IF ch = 7FX THEN
+    Input.KeyState(keys); shift := Input.SHIFT IN keys; ctrl := Input.CTRL IN keys;
+    IF (ch # 0C1X) & (ch # 0C2X) THEN goalF := NIL END;
+    IF (ch = 7FX) OR (ch = 0A1X) THEN  (* a selection made with the keyboard is deleted as a whole *)
+      IF (anchorF = F) & (F.sel # 0) THEN
+        beg := F.selbeg.pos; end := F.selend.pos; RemoveSelection(F); anchorF := NIL;
+        Texts.Delete(F.text, beg, end); SetCaret(F, beg); RETURN
+      END
+    END;
+    IF ch = 0C1X THEN MoveLine(F, 1, shift)  (* up *)
+    ELSIF ch = 0C2X THEN MoveLine(F, -1, shift)  (* down *)
+    ELSIF (ch = 0C3X) & shift THEN MoveCaret(F, NextPos(F.text, F.carloc.pos), TRUE)
+    ELSIF (ch = 0C4X) & shift THEN MoveCaret(F, PrevPos(F.text, F.carloc.pos), TRUE)
+    ELSIF ch = 0A8X THEN  (* Home, Ctrl+Home *)
+      IF ctrl THEN MoveCaret(F, 0, shift) ELSE MoveCaret(F, LineStart(F.text, F.carloc.pos), shift) END
+    ELSIF ch = 0A9X THEN  (* End, Ctrl+End *)
+      IF ctrl THEN MoveCaret(F, F.text.len, shift) ELSE MoveCaret(F, LineEnd(F.text, F.carloc.pos), shift) END
+    ELSIF ch = 0A2X THEN MovePage(F, 1, shift)  (* Page Up *)
+    ELSIF ch = 0A3X THEN MovePage(F, -1, shift)  (* Page Down *)
+    ELSIF ch = 01X THEN  (* Ctrl+A: select all *)
+      IF F.text.len > 0 THEN anchorF := NIL; SetSelection(F, 0, F.text.len) END
+    ELSIF ch = 03X THEN  (* Ctrl+C *)
+      IF CopySelection() THEN END
+    ELSIF ch = 18X THEN  (* Ctrl+X *)
+      IF CopySelection() THEN
+        Oberon.GetSelection(text, beg, end, time);
+        IF text = F.text THEN anchorF := NIL; RemoveSelection(F); Texts.Delete(text, beg, end); SetCaret(F, beg) END
+      END
+    ELSIF ch = 16X THEN PasteClipboard(F)  (* Ctrl+V *)
+    ELSIF ch = 7FX THEN
       IF F.carloc.pos > F.org THEN
         pos := PrevPos(F.text, F.carloc.pos);
         Texts.Delete(F.text, pos, F.carloc.pos);
         SetCaret(F, pos)
       END
-    ELSIF (ch = 0C1X) THEN  (* ^ *)
-  ELSIF (ch = 0C2X) THEN  (* v *)
     ELSIF ch = 0C3X THEN (* right *)
+      IF anchorF = F THEN RemoveSelection(F); anchorF := NIL END;
       IF F.carloc.pos < F.text.len THEN
         RemoveCaret(F); SetCaret(F, NextPos(F.text, F.carloc.pos))
       END
     ELSIF ch = 0C4X THEN (* left *)
+      IF anchorF = F THEN RemoveSelection(F); anchorF := NIL END;
       IF F.carloc.pos > 0 THEN
         RemoveCaret(F); SetCaret(F, PrevPos(F.text, F.carloc.pos))
       END
@@ -694,6 +885,7 @@ END MulDiv;
       END
     ELSIF (ch >= 0A0X) & (ch <= 0A9X) THEN
     ELSIF (ch >= 0F0X) & (ch <= 0FFX) THEN
+    ELSIF (ch < " ") & (ch # CR) & (ch # 09X) & (ch # 0AX) THEN  (* other Ctrl keys *)
     ELSE
       KW.lib := lib; KW.col := col; KW.voff := voff; Texts.Write(KW, ch);
       Texts.Insert(F.text, F.carloc.pos, KW.buf);
@@ -702,7 +894,7 @@ END MulDiv;
   END Write;
 
   PROCEDURE Defocus* (F: Frame);
-  BEGIN RemoveCaret(F)
+  BEGIN RemoveCaret(F); IF hiddenF = F THEN hiddenF := NIL END
   END Defocus;
 
   PROCEDURE Neutralize* (F: Frame);
@@ -911,6 +1103,20 @@ END MulDiv;
     END
   END RestoreCaret;
   
+  (* polpo: scroll with the scroll bar; the caret stays where it is in the text *)
+  PROCEDURE Scroll (F: Frame; pos: LONGINT);
+    VAR loc: Location; keep: BOOLEAN;
+  BEGIN
+    keep := F.car # 0;
+    IF keep THEN hiddenF := F; hiddenPos := F.carloc.pos END;
+    RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+    Show(F, pos);
+    IF hiddenF = F THEN
+      LocatePos(F, hiddenPos, loc);
+      IF loc.pos = hiddenPos THEN F.carloc := loc; FlipCaret(F); F.car := 1; hiddenF := NIL END
+    END
+  END Scroll;
+
   PROCEDURE Edit* (F: Frame; X, Y: INTEGER; Keys: SET);
     VAR
       M: Oberon.ConsumeMsg;
@@ -929,7 +1135,6 @@ END MulDiv;
           Oberon.DrawCursor(Oberon.Mouse, Oberon.Arrow, X, Y)
         UNTIL Keys = {};
         IF ~(2 IN keysum) THEN
-          RemoveMarks(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
           IF (0 IN keysum) OR (F.Y + F.H < Y) THEN
             IF 1 IN keysum THEN pos := 0
             ELSE pos := Max(F.org - LONG(F.H) * 25 DIV lsp, 0)
@@ -938,17 +1143,14 @@ END MulDiv;
   (*          pos := (F.Y + F.H - Y) * (F.text.len) DIV F.H*)
       pos:=MulDiv(F.text.len, F.Y + F.H - Y, F.H);
           END;
-          RemoveMarks(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
-          Show(F, pos)
+          Scroll(F, pos)
         ELSIF ~(0 IN keysum) THEN
-          RemoveMarks(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
-          Show(F, F.text.len)
+          Scroll(F, F.text.len)
         END
       ELSIF 2 IN Keys THEN
         TrackLine(F, X, Y, pos, keysum);
         IF (pos >= 0) & ~(0 IN keysum) THEN
-          RemoveMarks(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
-          Show(F, pos)
+          Scroll(F, pos)
         END
       END
     ELSE
@@ -1083,7 +1285,7 @@ END MulDiv;
   END Rescale;
 
   PROCEDURE  Handle* (F: Objects.Object; VAR M: Objects.ObjMsg);
-    VAR F1: Frame; u: Utf8.Char; n: INTEGER;
+    VAR F1: Frame; u: Utf8.Char; n: INTEGER; beg, end: LONGINT;
   BEGIN
     WITH F: Frame DO
     IF M IS Texts.UpdateMsg THEN
@@ -1100,7 +1302,16 @@ END MulDiv;
          WITH M: Oberon.InputMsg DO
           IF M.id = Oberon.track THEN Edit(F, M.X, M.Y, M.keys)
           ELSIF M.id = Oberon.consume THEN
-            IF F.car # 0 THEN
+            IF (F.car = 0) & (F.sel # 0) & ~M.utf & ((M.ch = 03X) OR (M.ch = 18X)) THEN
+              (* polpo: Ctrl+C, Ctrl+X in a frame with a selection and no caret (scrolled away) *)
+              IF CopySelection() THEN
+                IF M.ch = 18X THEN
+                  beg := F.selbeg.pos; end := F.selend.pos; RemoveSelection(F); anchorF := NIL;
+                  Texts.Delete(F.text, beg, end)
+                END;
+                M.res := 0
+              END
+            ELSIF F.car # 0 THEN
               IF M.utf THEN
                 IF utfExp > 0 THEN
                   IF (ORD(M.ch) >= 080H) & (ORD(M.ch) < 0C0H) THEN

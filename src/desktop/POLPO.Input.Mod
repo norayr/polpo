@@ -71,6 +71,7 @@ TYPE
         value: LONGINT;
   END;
 
+  Chars* = POINTER TO ARRAY OF CHAR;  (* polpo: selection and clipboard text *)
   Event= RECORD
         code, detail: CHAR;
         sequence: INTEGER;
@@ -120,10 +121,11 @@ CONST
   None= 0;
 
 VAR
-  clip*: POINTER TO ARRAY OF CHAR;  (* clipboard *)
+  clip*: Chars;  (* clipboard *)
   dfd: LONGINT;  (* Display Filedescriptor (X11 socket or /dev/fb0 *)
   mouseX, mouseY: INTEGER;
   keyss, keyState: SET;
+  modState: LONGINT;  (* polpo: X modifier mask of the last key or mouse event: 1 Shift, 4 Control, 8 Alt *)
   err: LONGINT;
   cb1, cb2: LONGINT;
   buf: ARRAY 32 OF CHAR; (* input char buffer *)
@@ -143,6 +145,11 @@ VAR
   CopyClip*, PasteClip*: PROCEDURE;  (* initialized in System *)
   x11, mmbe, iemouse: BOOLEAN;
   myProperty: LONGINT;
+  (* polpo: the X CLIPBOARD, Ctrl+C / Ctrl+V *)
+  xaClipboard, xaTargets, xaUtf8: LONGINT;  (* atoms *)
+  board: Chars;  (* text copied with Ctrl+C *)
+  pend: ARRAY 32 OF Event; npend: LONGINT;  (* events that arrived while waiting for a reply *)
+  boardOwned: BOOLEAN;  (* Oberon owns CLIPBOARD *)
 
 PROCEDURE WriteSH( str: ARRAY OF CHAR; i: LONGINT);
 BEGIN
@@ -288,20 +295,46 @@ IF Avail( {kbdfd}, 0) THEN  ReadChar( ch);
 END;
 END PollTTY;
 
-PROCEDURE InternAtom(): LONGINT;
-VAR b: ARRAY 8 OF LONGINT; res: LONGINT;
+(* read n bytes from the X connection *)
+PROCEDURE ReadFull(adr, n: LONGINT): BOOLEAN;
+VAR res: LONGINT;
 BEGIN
-  b[0]:=16+ 6*10000H;
-  b[1]:= 14;
-  SYSTEM.MOVE( SYSTEM.ADR( "OberonProperty"), SYSTEM.ADR(b[ 2]), 14);
-  res:=Linux0.Write0(dfd, SYSTEM.ADR(b),  24);
-  res:=Linux0.Read0(dfd, SYSTEM.ADR(b),  32);
-  IF trace THEN WriteSH("OberonProperty = ", b[2]) END;
+  WHILE n > 0 DO
+    res := Linux0.Read0(dfd, adr, n);
+    IF res <= 0 THEN RETURN FALSE END;
+    INC(adr, res); DEC(n, res)
+  END;
+  RETURN TRUE
+END ReadFull;
+
+(* polpo: read the reply to a request into b (32 bytes); events that come first are kept for
+   PollX. FALSE: an error came instead *)
+PROCEDURE ReadReply(VAR b: ARRAY OF LONGINT): BOOLEAN;
+VAR c: LONGINT;
+BEGIN
+  LOOP
+    IF ~ReadFull(SYSTEM.ADR(b[0]), 32) THEN RETURN FALSE END;
+    c := b[0] MOD 100H;
+    IF c = 1 THEN RETURN TRUE ELSIF c = 0 THEN RETURN FALSE END;
+    IF npend < LEN(pend) THEN SYSTEM.MOVE(SYSTEM.ADR(b[0]), SYSTEM.ADR(pend[npend]), 32); INC(npend) END
+  END
+END ReadReply;
+
+PROCEDURE InternAtom(name: ARRAY OF CHAR): LONGINT;
+VAR b: ARRAY 16 OF LONGINT; res, n: LONGINT;
+BEGIN
+  n:=0; WHILE (n < LEN(name)) & (name[n] # 0X) & (n < 48) DO INC(n) END;
+  b[0]:=16+ (2+(n+3) DIV 4)*10000H;
+  b[1]:= n;
+  SYSTEM.MOVE( SYSTEM.ADR( name[0]), SYSTEM.ADR(b[ 2]), n);
+  res:=Linux0.Write0(dfd, SYSTEM.ADR(b),  8+(n+3) DIV 4*4);
+  IF ~ReadReply(b) THEN b[2] := 0 END;
+  IF trace THEN WriteString(name); WriteSH(" = ", b[2]) END;
   RETURN b[2];
 END InternAtom;
 
 PROCEDURE GetProperty( VAR event: Event);
-VAR res: LONGINT; b: ARRAY 8 OF LONGINT;
+VAR res: LONGINT; b: ARRAY 8 OF LONGINT; data: Chars;
 BEGIN
   IF trace THEN
     Kernel.WriteString("GetProperty seq, win, atom, time, state");
@@ -318,13 +351,13 @@ BEGIN
   b[4]:= 0;  (* offset; *)
   b[5]:= 8192;  (*length;*)
   res:=Linux0.Write0( dfd, SYSTEM.ADR(b), 24);
-  res:=Linux0.Read0( dfd, SYSTEM.ADR(b), 32);
-  IF b[1]>0 THEN
-    NEW( clip, b[4]);
-    res:=Linux0.Read0( dfd, SYSTEM.ADR( clip^), b[4]);
-    IF res=b[4] THEN WriteString( clip^)
+  clip := NIL;
+  IF ReadReply(b) & (b[1]>0) THEN  (* b[1]: data length in words, b[4]: value length *)
+    NEW( data, b[1]*4);
+    IF ReadFull(SYSTEM.ADR(data^), b[1]*4) & (b[4] > 0) & (b[4] <= b[1]*4) THEN
+      NEW( clip, b[4]); SYSTEM.MOVE(SYSTEM.ADR(data^), SYSTEM.ADR(clip^), b[4])
     ELSE WriteString( "selection failed")
-    END;
+    END
   END;
 END GetProperty;
 
@@ -340,13 +373,46 @@ BEGIN
   END;
 END Copy;
 
+(** polpo: s[0..n-1] becomes the clipboard (Ctrl+C), offered to other programs *)
+PROCEDURE SetClipboard*(VAR s: ARRAY OF CHAR; n: LONGINT);
+VAR b: ARRAY 4 OF LONGINT; res, i: LONGINT;
+BEGIN
+  IF n > LEN(s) THEN n := LEN(s) END;
+  IF n <= 0 THEN RETURN END;
+  NEW(board, n); i := 0; WHILE i < n DO board[i] := s[i]; INC(i) END;
+  IF x11 THEN
+    b[0]:=22+4*10000H;  (* SetSelectionOwner *)
+    b[1]:=Display.wid;
+    b[2]:=xaClipboard;
+    b[3]:=CURRENTTIME;
+    res:=Linux0.Write0(dfd, SYSTEM.ADR(b),  16);
+    boardOwned := TRUE
+  END
+END SetClipboard;
+
+(** polpo: ask for the clipboard of another program (Ctrl+V); it arrives as typed characters.
+  FALSE: Oberon has the clipboard itself, or there is no X *)
+PROCEDURE RequestClipboard*(): BOOLEAN;
+VAR b: ARRAY 6 OF LONGINT; res: LONGINT;
+BEGIN
+  IF ~x11 OR boardOwned OR (PasteClip = NIL) THEN RETURN FALSE END;
+  b[0]:=24+6*10000H;  (* ConvertSelection *)
+  b[1]:=Display.wid;
+  b[2]:=xaClipboard;
+  b[3]:=xaUtf8;
+  b[4]:= myProperty;
+  b[5]:=CURRENTTIME;
+  res:=Linux0.Write0(dfd, SYSTEM.ADR(b),  24);
+  RETURN TRUE
+END RequestClipboard;
+
 PROCEDURE GetSelectionOwner(): LONGINT;
 VAR b: ARRAY 8 OF LONGINT; res: LONGINT;
 BEGIN
   b[0]:=23+2*10000H;
   b[1]:=XAPRIMARY;
   res:=Linux0.Write0(dfd, SYSTEM.ADR(b),  8);
-  res:=Linux0.Read0(dfd, SYSTEM.ADR(b),  32);
+  IF ~ReadReply(b) THEN b[2] := 0 END;
   RETURN b[2];
 END GetSelectionOwner;
 
@@ -364,34 +430,44 @@ BEGIN
   END;
 END Paste;
 
-PROCEDURE SendSelection(VAR event: Event);
-VAR res: LONGINT;
+PROCEDURE SendSelection(VAR event: Event; data: Chars);
+VAR res, prop, n: LONGINT;
     e: ARRAY 11 OF LONGINT;
     p: ARRAY 6 OF LONGINT;
+    t: ARRAY 4 OF LONGINT;
 BEGIN
-  IF clip = NIL THEN
-    WriteString("SendSelection: clip = NIL!");
+  IF data = NIL THEN
+    WriteString("SendSelection: no data!");
     RETURN
   END;
+  prop := event.ex MOD 10000H + 10000H*event.ey;
+  IF prop = 0 THEN prop := event.d END;  (* obsolete clients: the target as property *)
   e[0]:=  25+11*10000H;  (* SendEvent *)
   e[1]:=  event.b; (*Display.scn.root;*)
   e[2]:=  0;
   e[0+3]:= 31; (* SelectionNotify *)
-  e[1+3]:= CURRENTTIME;
+  e[1+3]:= event.time;
   e[2+3]:= event.b;  (*requestor *)
-  e[3+3]:= XAPRIMARY;
+  e[3+3]:= event.c;  (* selection *)
   e[4+3]:= event.d;  (* target *)
-  IF (event.c = XAPRIMARY)  & (event.d = XASTRING) THEN
-    e[5+3] := event.ex + 10000H*event.ey;  (*property *)
-
-    p[0]:=18+0*100H+(6+(LEN(clip^)+3) DIV 4)*10000H;  (* ChangeProperty *)
+  IF event.d = xaTargets THEN  (* polpo: the formats offered *)
+    e[5+3] := prop;
+    t[0] := xaTargets; t[1] := xaUtf8; t[2] := XASTRING;
+    p[0]:=18+0*100H+(6+3)*10000H;  (* ChangeProperty *)
+    p[1]:= event.b; p[2]:= prop; p[3]:= 4 (* ATOM *); p[4]:= 32; p[5]:= 3;
+    res:=Linux0.Write0(dfd, SYSTEM.ADR(p),  6*4);
+    res:=Linux0.Write0(dfd, SYSTEM.ADR(t),  3*4);
+  ELSIF (event.d = XASTRING) OR (event.d = xaUtf8) THEN
+    e[5+3] := prop;
+    n := LEN(data^);
+    p[0]:=18+0*100H+(6+(n+3) DIV 4)*10000H;  (* ChangeProperty *)
     p[1]:= event.b;  (*requestor*)
-    p[2]:= event.ex + 10000H*event.ey;  (*property*)
+    p[2]:= prop;  (*property*)
     p[3]:= event.d; (* target*)
     p[4]:= 8;  (* format (bits) *)
-    p[5]:= LEN(clip^);
+    p[5]:= n;
     res:=Linux0.Write0(dfd, SYSTEM.ADR(p),  6*4);
-    res:=Linux0.Write0(dfd, SYSTEM.ADR(clip^),  (LEN(clip^)+3) DIV 4*4);
+    res:=Linux0.Write0(dfd, SYSTEM.ADR(data^),  (n+3) DIV 4*4);
   ELSE
     IF trace THEN WriteString("Failed: ") END;
     e[5+3] := None  (*property *)
@@ -411,7 +487,7 @@ BEGIN
     WriteSH( "owner: ",event.a);   WriteSH( "requestor: ",event.b);   WriteSH( "selection: ",event.c);
     WriteSH( "target: ", event.d);  WriteSH( "property: ",event.ex+10000H*event.ey);
   END;
-  IF (event.b = XAPRIMARY) & (event.d=myProperty) THEN
+  IF ((event.b = XAPRIMARY) OR (event.b = xaClipboard)) & (event.d=myProperty) THEN
     GetProperty(event);
   END
 END ReceiveSelection;
@@ -422,8 +498,13 @@ VAR
   event: Event;
   c: CHAR;
 BEGIN
-  WHILE Avail( {dfd}, 0) DO
-    res:=Linux0.Read0(dfd, SYSTEM.ADR(event),  32);
+  WHILE (npend > 0) OR Avail( {dfd}, 0) DO
+    IF npend > 0 THEN  (* polpo: events kept by ReadReply first *)
+      event := pend[0]; i := 1;
+      WHILE i < npend DO pend[i-1] := pend[i]; INC(i) END;
+      DEC(npend); res := 32
+    ELSE res:=Linux0.Read0(dfd, SYSTEM.ADR(event),  32)
+    END;
     IF res # 32 THEN
       WriteString("PollX: short X11 read");
       RETURN
@@ -431,9 +512,11 @@ BEGIN
     IF res=32 THEN
       code:= ORD(event.code) MOD 32;
       detail:= ORD( event.detail);
+      IF (code >= 2) & (code <= 6) THEN modState := event.f MOD 10000H END;
       IF code=2 THEN    (* KeyPress *)
         state:=event.f MOD 10000H;
         grp := state DIV 2000H MOD 4; state := state MOD 2000H;
+        IF ODD(state DIV 4) THEN DEC(state, 4) END;  (* polpo: Control does not change the symbol *)
         IF ODD(state DIV 80H) THEN state:=2 + state MOD 2;
         ELSIF state MOD 8=2 THEN state:=1;
         ELSIF state MOD 8 =3 THEN state:=2;
@@ -497,6 +580,8 @@ BEGIN
           IF ORD(c) >= 0A0H THEN PutUnicode(ORD(c)); c := 0X END
         END;
 
+        (* polpo: Ctrl+letter gives the control character, Ctrl+C = 03X *)
+        IF ODD(event.f MOD 10000H DIV 4) & (CAP(c) >= "A") & (CAP(c) <= "Z") THEN c := CHR(ORD(CAP(c)) - 40H) END;
         IF sym=0AFEH THEN Paste;  (* ctrl-v *)
         ELSIF c#0X THEN
           Put(c, FALSE);
@@ -529,13 +614,14 @@ BEGIN
       ELSIF code=15 THEN   (* VisibilityChange *)
       ELSIF code= 28 THEN    (* PropertyNotify *)
       ELSIF code = 29 THEN  (* SelectionClear *)
-        WriteString("ClearSelection");
+        IF event.b = xaClipboard THEN boardOwned := FALSE END;
 (*        selection:=NIL;  *)
       ELSIF code= 30 THEN  (* SelectionRequest, SendSelection *)
-        IF (CopyClip # NIL) & (event.a # event.b) THEN
+        IF event.c = xaClipboard THEN SendSelection(event, board)
+        ELSIF (CopyClip # NIL) & (event.a # event.b) THEN
           CopyClip;
           IF clip # NIL THEN
-            SendSelection( event);
+            SendSelection( event, clip);
             clip:=NIL;
           ELSE
             WriteString("PollX: clip = NIL after CopyClip");
@@ -543,8 +629,9 @@ BEGIN
         END;
       ELSIF code= 31 THEN  (* SelectionNotify, ReceiveSelection *)
         IF PasteClip# NIL THEN
+          clip:=NIL;
           ReceiveSelection( event);
-          PasteClip;
+          IF clip # NIL THEN PasteClip END;
           clip:=NIL;
         END;
       ELSIF code=0 THEN  (* error *)
@@ -635,7 +722,9 @@ END SetMouseLimits;
 PROCEDURE KeyState*(VAR keys: SET);
 BEGIN
   keys:= {};
-  IF ~keywarn THEN WriteString("Warning: KeyState currently not implemented in Display."); keywarn:= TRUE END;
+  IF ODD(modState) THEN INCL(keys, SHIFT) END;
+  IF ODD(modState DIV 4) THEN INCL(keys, CTRL) END;
+  IF ODD(modState DIV 8) THEN INCL(keys, ALT) END
 END KeyState;
 
 (*
@@ -786,7 +875,8 @@ BEGIN
     dfd:=Display.InitX11();
     RequireSelectable(dfd);
     fdset:={dfd};
-    myProperty:=InternAtom();
+    myProperty:=InternAtom("OberonProperty");
+    xaClipboard:=InternAtom("CLIPBOARD"); xaTargets:=InternAtom("TARGETS"); xaUtf8:=InternAtom("UTF8_STRING");
   ELSE
     dfd:=Display.InitFB();
     InitMouseFB;

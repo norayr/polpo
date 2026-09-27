@@ -127,6 +127,7 @@ VAR
   dfd: LONGINT;  (* Display Filedescriptor (X11 socket or /dev/fb0 *)
   mouseX, mouseY: INTEGER;
   keyss, keyState: SET;
+  modState: LONGINT;  (* polpo: modifiers of the last key or mouse report, as X: 1 Shift, 4 Control, 8 Alt *)
   err: LONGINT;
   cb1, cb2: LONGINT;
   buf: ARRAY 32 OF CHAR; (* input char buffer *)
@@ -315,6 +316,10 @@ BEGIN
   END;
 
   btn:=b MOD 4;
+  modState := 0;  (* SGR modifier bits: 4 Shift, 8 Meta, 16 Control *)
+  IF ODD(b DIV 4) THEN INC(modState, 1) END;
+  IF ODD(b DIV 8) THEN INC(modState, 8) END;
+  IF ODD(b DIV 16) THEN INC(modState, 4) END;
   IF term = "M" THEN
     IF b >= 64 THEN
       (* wheel events ignored for now *)
@@ -362,10 +367,11 @@ BEGIN
 END MapCSIKey;
 
 PROCEDURE PollTTY;
-VAR ch, ch2, term: CHAR; n: LONGINT; isUTF: BOOLEAN;
+VAR ch, ch2, term: CHAR; n, m: LONGINT; isUTF: BOOLEAN;
 BEGIN
 IF Avail( {kbdfd}, 0) THEN  ReadChar( ch);
   isUTF := ORD(ch) >= 080H;
+  modState := 0;
   IF ( ch= 1BX) & Avail( {kbdfd}, 0) THEN
     isUTF := FALSE;
     ReadChar( ch);
@@ -382,6 +388,8 @@ IF Avail( {kbdfd}, 0) THEN  ReadChar( ch);
         ELSIF ch2="B" THEN ch:=0C2X    (* down *)
         ELSIF ch2="C" THEN ch:=0C3X    (* right *)
         ELSIF ch2="D" THEN ch:=0C4X    (* left *)
+        ELSIF ch2="H" THEN ch:=0A8X    (* Home *)
+        ELSIF ch2="F" THEN ch:=0A9X    (* End *)
         END
       END
 
@@ -390,6 +398,8 @@ IF Avail( {kbdfd}, 0) THEN  ReadChar( ch);
       IF ch="<" THEN
         IF PollMouseSGR() THEN ch:=0X END
       ELSIF ( ch>="A") & (ch<="D") THEN ch:= CHR( ORD(ch)+80H);
+      ELSIF ch="H" THEN ch:=0A8X    (* Home *)
+      ELSIF ch="F" THEN ch:=0A9X    (* End *)
       ELSIF ch="[" THEN     (* VT100/xterm old application function keys: ESC [ [ A..E *)
         ch:=0X;
         IF Avail( {kbdfd}, 0) THEN
@@ -413,6 +423,18 @@ IF Avail( {kbdfd}, 0) THEN  ReadChar( ch);
         END;
         IF term="~" THEN
           MapCSIKey(n, ch)
+        ELSIF (term=";") & ReadDec(m, term) THEN
+          (* modified keys: ESC [ n ; m final, m-1 = 1 Shift + 2 Alt + 4 Control *)
+          DEC(m);
+          IF ODD(m) THEN INC(modState, 1) END;
+          IF ODD(m DIV 2) THEN INC(modState, 8) END;
+          IF ODD(m DIV 4) THEN INC(modState, 4) END;
+          IF term="~" THEN MapCSIKey(n, ch)
+          ELSIF (term>="A") & (term<="D") THEN ch:=CHR(ORD(term)+80H)
+          ELSIF term="H" THEN ch:=0A8X
+          ELSIF term="F" THEN ch:=0A9X
+          ELSE ch:=0X
+          END
         ELSE
           (* Ignore modified CSI forms like ESC [ 1 ; 2 P for now.
              Drain until a likely final byte so the sequence does not leak as text. *)
@@ -782,7 +804,9 @@ END SetMouseLimits;
 PROCEDURE KeyState*(VAR keys: SET);
 BEGIN
   keys:= {};
-  IF ~keywarn THEN WriteString("Warning: KeyState currently not implemented in Display."); keywarn:= TRUE END;
+  IF ODD(modState) THEN INCL(keys, SHIFT) END;
+  IF ODD(modState DIV 4) THEN INCL(keys, CTRL) END;
+  IF ODD(modState DIV 8) THEN INCL(keys, ALT) END
 END KeyState;
 
 (*
@@ -935,6 +959,35 @@ BEGIN
   WHILE (i<LEN(s)) & (s[i]#0X) & (j<LEN(b)-1) DO b[j]:=s[i]; INC(i); INC(j) END;
   res:=Linux0.Write0(1, SYSTEM.ADR(b), j)
 END WriteCSI;
+
+(** polpo: s[0..n-1] becomes the clipboard (Ctrl+C): sent to the terminal with OSC 52,
+  xterm puts it on the clipboard of the system when it allows (disallowedWindowOps) *)
+PROCEDURE SetClipboard*(VAR s: ARRAY OF CHAR; n: LONGINT);
+CONST B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+VAR b: ARRAY 72 OF CHAR; tab: ARRAY 65 OF CHAR; i, j, k, v, res: LONGINT;
+BEGIN
+  IF n > LEN(s) THEN n := LEN(s) END;
+  tab := B64;
+  b[0] := 1BX; b[1] := "]"; b[2] := "5"; b[3] := "2"; b[4] := ";"; b[5] := "c"; b[6] := ";";
+  res := Linux0.Write0(1, SYSTEM.ADR(b), 7);
+  i := 0; j := 0;
+  WHILE i < n DO
+    v := ORD(s[i]) * 10000H; k := 1;
+    IF i + 1 < n THEN INC(v, ORD(s[i+1]) * 100H); INC(k) END;
+    IF i + 2 < n THEN INC(v, ORD(s[i+2])); INC(k) END;
+    b[j] := tab[v DIV 40000H MOD 64]; b[j+1] := tab[v DIV 1000H MOD 64];
+    IF k > 1 THEN b[j+2] := tab[v DIV 40H MOD 64] ELSE b[j+2] := "=" END;
+    IF k > 2 THEN b[j+3] := tab[v MOD 64] ELSE b[j+3] := "=" END;
+    INC(j, 4); INC(i, 3);
+    IF j >= 64 THEN res := Linux0.Write0(1, SYSTEM.ADR(b), j); j := 0 END
+  END;
+  b[j] := 07X; res := Linux0.Write0(1, SYSTEM.ADR(b), j + 1)
+END SetClipboard;
+
+(** polpo: the clipboard of other programs comes from the terminal's own paste *)
+PROCEDURE RequestClipboard*(): BOOLEAN;
+BEGIN RETURN FALSE
+END RequestClipboard;
 
 PROCEDURE CloseTerm;
 BEGIN

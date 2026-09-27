@@ -7,7 +7,7 @@ MODULE Edit;  (** portable *) (*JG 4.4.95 / NW 24.1.91*)
 
   CONST
     CR = 0DX; maxlen = 32;
-    StandardMenu = "System.Close System.Copy System.Grow Edit.Search Edit.Store";
+    StandardMenu = "System.Close System.Copy System.Grow Edit.Search Edit.Store Edit.StorePlain";
 
   TYPE
     Run = POINTER TO RunDesc;  (* polpo: font runs *)
@@ -113,7 +113,34 @@ MODULE Edit;  (** portable *) (*JG 4.4.95 / NW 24.1.91*)
     END
   END Show;
 
-  PROCEDURE Store*;
+  (* polpo: is the file name plain text (not an Oberon text)? *)
+  PROCEDURE PlainFile (VAR name: ARRAY OF CHAR): BOOLEAN;
+    VAR f: Files.File; R: Files.Rider; ch: CHAR;
+  BEGIN
+    f := Files.Old(name);
+    IF f = NIL THEN RETURN FALSE END;
+    IF Files.Length(f) = 0 THEN RETURN TRUE END;
+    Files.Set(R, f, 0); Files.Read(R, ch);
+    RETURN (ch # 0F0X) & (ch # 0F7X) & (ch # 01X)
+  END PlainFile;
+
+  (* polpo: does T have one font, colour and offset, and no objects? *)
+  PROCEDURE Uniform (T: Texts.Text): BOOLEAN;
+    VAR R: Texts.Reader; ch: CHAR; lib: Objects.Library; col, voff: SHORTINT;
+  BEGIN
+    Texts.OpenReader(R, T, 0); Texts.Read(R, ch);
+    lib := R.lib; col := R.col; voff := R.voff;
+    WHILE ~R.eot DO
+      IF (R.lib # lib) OR (R.col # col) OR (R.voff # voff) OR ~((R.lib = NIL) OR (R.lib IS Fonts.Font)) THEN
+        RETURN FALSE
+      END;
+      Texts.Read(R, ch)
+    END;
+    RETURN TRUE
+  END Uniform;
+
+  (* store the text of a viewer; plain: as ASCII, line ends LF, only characters (polpo) *)
+  PROCEDURE StoreText (plain: BOOLEAN);
     VAR par: Oberon.ParList;
       V: Viewers.Viewer;
       Text: TextFrames.Frame;
@@ -121,6 +148,7 @@ MODULE Edit;  (** portable *) (*JG 4.4.95 / NW 24.1.91*)
       S: Texts.Scanner;
       f: Files.File;
       beg, end, time, len: LONGINT;
+      Rf: Files.Rider; R: Texts.Reader; ch: CHAR;
 
     PROCEDURE Backup (VAR name: ARRAY OF CHAR);
       VAR res, i: INTEGER; bak: ARRAY 320 OF CHAR;
@@ -131,7 +159,7 @@ MODULE Edit;  (** portable *) (*JG 4.4.95 / NW 24.1.91*)
     END Backup;
 
   BEGIN
-    Texts.WriteString(W, "Edit.Store ");
+    IF plain THEN Texts.WriteString(W, "Edit.StorePlain ") ELSE Texts.WriteString(W, "Edit.Store ") END;
     par := Oberon.Par;
     IF par.frame = par.vwr.dsc THEN
       V := par.vwr; Texts.OpenScanner(S, V.dsc(TextFrames.Frame).text, 0)
@@ -146,6 +174,8 @@ MODULE Edit;  (** portable *) (*JG 4.4.95 / NW 24.1.91*)
       Text := V.dsc.next(TextFrames.Frame);
       TextFrames.Mark(Text, -1);
       Texts.WriteString(W, S.s);
+      (* polpo: a plain file stays plain while the text has one font and colour *)
+      IF ~plain & PlainFile(S.s) & Uniform(Text.text) THEN plain := TRUE; Texts.WriteString(W, " (plain)") END;
       f := Files.New(S.s);
       IF f = NIL THEN
         Texts.WriteString(W, " invalid name");
@@ -155,12 +185,33 @@ MODULE Edit;  (** portable *) (*JG 4.4.95 / NW 24.1.91*)
         Texts.WriteLn(W);
         Texts.Append(Oberon.Log, W.buf);
         Backup(S.s);
-        Texts.Store(Text.text, f, 0, len);
+        IF plain THEN
+          Files.Set(Rf, f, 0); Texts.OpenReader(R, Text.text, 0); Texts.Read(R, ch);
+          WHILE ~R.eot DO
+            IF (R.lib = NIL) OR (R.lib IS Fonts.Font) THEN
+              IF ch = CR THEN ch := 0AX END;
+              Files.Write(Rf, ch)
+            END;
+            Texts.Read(R, ch)
+          END
+        ELSE Texts.Store(Text.text, f, 0, len)
+        END;
         Files.Register(f)
       END;
       TextFrames.Mark(Text, 1)
     END
+  END StoreText;
+
+  (** Edit.Store: store the text as an Oberon text, with fonts and colours *)
+  PROCEDURE Store*;
+  BEGIN StoreText(FALSE)
   END Store;
+
+  (** Edit.StorePlain: store the text as plain ASCII, without fonts and colours (polpo);
+    parameters as for Edit.Store *)
+  PROCEDURE StorePlain*;
+  BEGIN StoreText(TRUE)
+  END StorePlain;
 
   PROCEDURE CopyFont*;
     VAR R: Texts.Reader;

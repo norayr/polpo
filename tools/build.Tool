@@ -68,7 +68,7 @@ compiler.Compile src/desktop/POLPO.V24.Mod
 compiler.Compile src/desktop/Printer.Mod
 
 # ui clients
-compiler.Compile src/desktop/Edit.Mod
+compiler.Compile /s src/desktop/Edit.Mod
 compiler.Compile src/desktop/Styles.Mod
 compiler.Compile src/desktop/ScriptFrames.Mod
 compiler.Compile src/desktop/Script.Mod

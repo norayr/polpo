@@ -1714,6 +1714,21 @@ BEGIN
   RETURN FALSE
 END GetAuth;   
 
+(* polpo: the socket of the X server in DISPLAY, ":7" is /tmp/.X11-unix/X7; default X0 *)
+PROCEDURE SocketPath(VAR path: ARRAY OF CHAR);
+VAR d: ARRAY 64 OF CHAR; i, j: LONGINT;
+BEGIN
+  COPY("/tmp/.X11-unix/X", path); j := 0; WHILE path[j] # 0X DO INC(j) END;
+  Kernel.GetConfig("DISPLAY", d);
+  i := 0; WHILE (d[i] # 0X) & (d[i] # ":") DO INC(i) END;
+  IF d[i] = ":" THEN INC(i) END;
+  IF (d[i] < "0") OR (d[i] > "9") THEN path[j] := "0"; INC(j)
+  ELSE
+    WHILE (d[i] >= "0") & (d[i] <= "9") & (j < LEN(path) - 1) DO path[j] := d[i]; INC(i); INC(j) END
+  END;
+  path[j] := 0X
+END SocketPath;
+
 PROCEDURE InitX11*(): LONGINT;
 VAR  i, w, h, res, lw: LONGINT;
   sa1: Linux0.SockAddrUn;
@@ -1731,7 +1746,7 @@ BEGIN
     IF xfd <=0 THEN Kernel.Shutdown(1) END;
     RequireSelectable(xfd);
     sa1.pf:= PFUNIX;
-    sa1.path:= X11SOCKETPATH;
+    SocketPath(sa1.path);
     res:= Linux0.Connect0( xfd, SYSTEM.ADR( sa1), SIZE(Linux0.SockAddrUn));
   ELSE    (* we are on an SSH connection ... *)
     WriteString(bdata);

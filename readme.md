@@ -141,6 +141,30 @@ in text viewers.
 How `Oberon.Text` is read, and how your own programs can keep settings there, is
 described in [texts.md](texts.md).
 
+### Editing with the keyboard
+
+Text viewers (tools like System.Tool, the log, texts opened with `Edit.Open`) can be
+used like a common editor. The left pane, `System.Text`, is a Script viewer and keeps
+the classic keys.
+
+* arrows move the caret, Up and Down keep the column and scroll at the edges;
+  Home/End go to the start/end of the line, Ctrl+Home/Ctrl+End of the text;
+  Page Up/Page Down move by a viewer height
+* Shift with any of these selects; Backspace or Delete removes a selection made so
+* Ctrl+A selects the whole text
+* Ctrl+C copies the selection, Ctrl+X cuts it, Ctrl+V pastes at the caret. Inside
+  Oberon fonts and colours are kept. The copied text is also on the X clipboard, so
+  Ctrl+V in other programs pastes it, and Ctrl+V in Oberon pastes what other programs
+  copied. In xterm (sixel) Oberon, Ctrl+C sends the text to xterm's clipboard (OSC 52,
+  when xterm allows it) and Shift+Insert pastes from other programs.
+* Shift+right click extends the selection to the mouse, or selects from the caret to
+  the mouse: left click at the start, scroll with the scroll bar, Shift+right click at
+  the end, like in xterm. Scrolling keeps the selection and the caret.
+* `Edit.Store` keeps a plain file (a `.Mod` source, `Oberon.Text`) plain as long as its
+  text has one font and colour; the log then says `(plain)`. `Edit.StorePlain` (in the
+  menu, or `Edit.StorePlain name` with the marked viewer) always stores plain ASCII,
+  dropping fonts and colours
+
 ### Changing the fonts of a document
 
 * `Edit.ChangeFont Syntax10.Scn.Fnt` sets the font of the selected text: select the text
