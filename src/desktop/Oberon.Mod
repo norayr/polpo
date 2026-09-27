@@ -598,7 +598,7 @@ BEGIN
   NextTask := GCTask;
   NextTask.next := NextTask;
   Collect;
-  Fonts.Default := Fonts.This("Syntax20.Scn.Fnt");
+  Fonts.Default := Fonts.This("Syntax10.Scn.Fnt");  (* polpo: larger with Fonts.scale (System.FontScale, OFONTSCALE) *)
   CurFnt := Fonts.Default;
   CurCol := Display.FG;
   CurOff := 0;

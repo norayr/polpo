@@ -238,6 +238,7 @@ TYPE
 VAR
   Unit*: LONGINT; (** RasterUnit = Unit/36000 mm *)
   Zoom*: LONGINT;  (** Zoom factor for HiDPI displays, currently only X11 with XShm *)
+  DPI*: INTEGER;  (** logical pixels per inch (divided by Zoom), 0 if unknown; used by Fonts for scaling *)
   Left*, (** Left margin of black-and-white screen. *)
   ColLeft*, (** Left margin of secondary display, often same as Left. *)
   Bottom*, (** Bottom of primary map. *)
@@ -1535,6 +1536,7 @@ BEGIN
   gmr:=v.green.offset; gmw:=v.green.length;
   bmr:=v.blue.offset; bmw:=v.blue.length;
   Width:=SHORT(v.xres); Height:=SHORT(v.yres); UBottom:= SHORT(v.yres-v.yresvirtual);
+  IF v.width > 0 THEN DPI:=SHORT(v.xres*254 DIV (v.width*10)) END;  (* fbdev reports the width in mm *)
   fbadr:=Linux0.Mmap20( 0, f.smemlen, 3 (* prot: protRead+protWrite=3*), Linux0.MAPSHARED (* flags: MapShared=1*) , xfd, 0);
   IF (fbadr>-100) & (fbadr<0 ) THEN WriteSH("Can't mmap framebuffer device ", -fbadr); WriteSH(" f.smemlen=  ", f.smemlen);Kernel.Shutdown(0) END;
   IF v.bitsperpixel=16 THEN displayFormat:=color565; bytes:=2; DrawPattern:=DrawPattern16;
@@ -1830,6 +1832,7 @@ BEGIN
     END;
     KeyboardMappingX11;
     IF scn.width >=3000 THEN displayFormat:= color8888; bytes:=8; DrawPattern:=DrawPattern64; Zoom:=2 END;
+    IF scn.wmm > 0 THEN DPI:=SHORT(LONG(scn.width)*254 DIV (LONG(scn.wmm)*10) DIV Zoom) END;  (* X11 reports the screen size in mm *)
 
 (* Use Kernel.GetConfig for default Width, Height *)
     Kernel.GetConfig("OWIDTH", bdata);
@@ -1859,7 +1862,7 @@ BEGIN
 END InitX11;
 
 BEGIN
-  Zoom:=1;
+  Zoom:=1; DPI:=0;
   trace:=Kernel.trace="Display";
   Left := 0;  ColLeft := 0;  Bottom := 0;  UBottom := 0; Unit := 10000;
   tcp:=0; ShmReqCode:= 0;

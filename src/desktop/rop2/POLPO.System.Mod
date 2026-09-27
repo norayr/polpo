@@ -54,6 +54,38 @@ END OpenText;
 
 (* --- Toolbox for system control *)
 
+(* polpo: set the font scale and let all frames lay out their texts again *)
+PROCEDURE ApplyFontScale(percent: LONGINT);
+VAR M: Fonts.ScaleMsg; C: Display.ControlMsg;
+BEGIN
+  M.oldH := Fonts.Default.height;
+  Fonts.SetScale(SHORT(percent));
+  M.newH := Fonts.Default.height;
+  Kernel.WriteString("System.FontScale "); Kernel.WriteInt(percent, 0); Kernel.WriteString(" default font height ");
+  Kernel.WriteInt(M.oldH, 0); Kernel.WriteString(" -> "); Kernel.WriteInt(M.newH, 0); Kernel.WriteLn;
+  IF M.newH # M.oldH THEN
+    TextFrames.Rescale;
+    M.F := NIL; Display.Broadcast(M);  (* frames and viewers adopt the new sizes *)
+    C.F := NIL; C.id := Display.suspend; Display.Broadcast(C);  (* and are laid out again *)
+    C.F := NIL; C.id := Display.restore; Display.Broadcast(C)
+  END
+END ApplyFontScale;
+
+(** System.SetFontScale percent | ^  -- scale all screen fonts, e.g. 150 or 200; without
+  a parameter the current scale is shown. *)
+PROCEDURE SetFontScale*;
+VAR beg, end, time: LONGINT; T: Texts.Text; S: Texts.Scanner;
+BEGIN
+  Texts.OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Texts.Scan(S);
+  IF (S.class = Texts.Char) & (S.c = "^") THEN
+    Oberon.GetSelection(T, beg, end, time);
+    IF time # -1 THEN Texts.OpenScanner(S, T, beg); Texts.Scan(S) END
+  END;
+  IF S.class = Texts.Int THEN ApplyFontScale(S.i)
+  ELSE Texts.WriteString(W, "System.FontScale "); Texts.WriteInt(W, Fonts.scale, 0); Texts.WriteLn(W); Texts.Append(Oberon.Log, W.buf)
+  END
+END SetFontScale;
+
 PROCEDURE SetFont*;
 VAR beg, end, time: LONGINT; T: Texts.Text; S: Texts.Scanner; f: Fonts.Font;
 BEGIN
@@ -1071,6 +1103,12 @@ BEGIN
   IF ~init THEN
     init := TRUE;  (* avoid user call *)
     Texts.OpenWriter(Wt);
+    (* polpo: font scale from System.FontScale in Oberon.Text, unless OFONTSCALE is set *)
+    Kernel.GetConfig("OFONTSCALE", S.s);
+    IF S.s = "" THEN
+      Oberon.OpenScanner(S, "System.FontScale");
+      IF S.class = Texts.Int THEN ApplyFontScale(S.i) END
+    END;
     Oberon.OpenScanner(S, "System.InitCommands");
     IF S.class = Texts.Inval THEN
       OpenLog;

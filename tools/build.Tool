@@ -50,16 +50,16 @@ linker.Link bin/x86/loksh2 /refs /integrate 8049000H obj/x86/Linux0 obj/x86/Kern
 # ui oberon
 compiler.Compile /s src/desktop/POLPO.Objects.Mod
 compiler.Compile src/desktop/POLPO.FileDir.Mod
-compiler.Compile /x src/desktop/POLPO.Display.Mod
+compiler.Compile /x /s src/desktop/POLPO.Display.Mod
 compiler.Compile /s src/desktop/POLPO.Input.Mod
-compiler.Compile src/desktop/POLPO.Fonts.Mod
+compiler.Compile /s src/desktop/POLPO.Fonts.Mod
 compiler.Compile src/desktop/POLPO.Texts.Mod
 compiler.Compile src/desktop/Viewers.Mod
 compiler.Compile /s src/desktop/Oberon.Mod
 compiler.Compile src/desktop/POLPO.In.Mod
 compiler.Compile src/desktop/MenuViewers.Mod
-compiler.Compile src/desktop/POLPO.TextFrames.Mod
-compiler.Compile src/desktop/POLPO.System.Mod
+compiler.Compile /s src/desktop/POLPO.TextFrames.Mod
+compiler.Compile /s src/desktop/POLPO.System.Mod
 compiler.Compile src/desktop/POLPO.Bitmaps.Mod
 compiler.Compile src/desktop/Out.Mod
 compiler.Compile src/desktop/Pictures.Mod

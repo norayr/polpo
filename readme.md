@@ -80,6 +80,23 @@ In theory, mlterm should also work, at least they claim they support sixel mode.
 
 And we don't know how xterm of your OS is compiled. We tested with xterm on Gentoo that is compiled with 'sixel' USE flag. Our friend confirmed that it worked on their Arch. Our other friend confirmed it didn't work on their Debian.
 
+### HiDPI screens: font scaling
+
+Screen fonts can be scaled, so that every text, including existing documents,
+is shown larger with the real Syntax and Oberon bitmap fonts:
+
+* `FontScale = 150` in the `System` section of `Oberon.Text`, or the environment
+  variable `OFONTSCALE=150` (percent);
+* `System.SetFontScale 200` changes it while Oberon runs: the fonts are reloaded,
+  a message is broadcast and all viewers lay out their texts again;
+* without a setting the scale follows the screen resolution reported by X11 or the
+  framebuffer (96 dpi = 100%); many X servers report 96 dpi, so set it explicitly.
+
+A text asking for `Syntax10.Scn.Fnt` gets the existing font nearest to 10 * scale / 100,
+of the same family if possible (at 200% the real Syntax20), else of the Oberon family.
+Texts keep their font names, so documents are stored unchanged. `LineSpacing = 150`
+(percent of the font height, default 150) sets the spacing of lines in text viewers.
+
 ### ARM
 
 polpo also runs on 32-bit ARM Linux. The ARM compiler is the ETH/OLR ARM

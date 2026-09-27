@@ -65,6 +65,7 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
     menuH*, barW*, left*, right*, top*, bot*, lsp*: INTEGER; (*standard sizes*)
     MarkColor, BarColor, MenuBG, TextBG, FullColor, mode: INTEGER;
     asr, dsr, selH, markW, eolW: INTEGER;
+    oldLeft, oldRight, oldTop, oldBot, oldLsp: INTEGER;  (* standard sizes before Rescale *)
     ch: CHAR;
     utfBuf: ARRAY 4 OF CHAR; utfLen, utfExp: INTEGER;
     utfLib: Objects.Library; utfCol, utfVoff: SHORTINT;
@@ -1041,6 +1042,46 @@ END MulDiv;
     END
   END StartUTF;
 
+  (* polpo: line spacing in percent of the default font height: System.LineSpacing in
+     Oberon.Text, default 150 *)
+  PROCEDURE LineSpacing(): LONGINT;
+    VAR S: Texts.Scanner; v: LONGINT;
+  BEGIN
+    v := 150;
+    Oberon.OpenScanner(S, "System.LineSpacing");
+    IF (S.class = Texts.Int) & (S.i >= 100) & (S.i <= 300) THEN v := S.i END;
+    RETURN v
+  END LineSpacing;
+
+  (* standard sizes from the default font *)
+  PROCEDURE SetMetrics;
+  BEGIN
+  IF Modern THEN menuH := Fonts.Default.height + 8
+  ELSE menuH := Fonts.Default.height + 2
+  END;
+  barW := Fonts.Default.height + 2;
+  left := barW + Fonts.Default.height DIV 2;
+  right := Fonts.Default.height DIV 2;
+  IF Modern THEN top := Fonts.Default.height DIV 2 * 2 DIV 3
+  ELSE top := Fonts.Default.height DIV 2
+  END;
+  bot := Fonts.Default.height DIV 2;
+  asr := Fonts.Default.maxY;
+  dsr := -Fonts.Default.minY;
+  lsp := SHORT(Fonts.Default.height * LineSpacing() DIV 100);  (* polpo: leading between lines *)
+  selH := Fonts.Default.height;
+  markW := Fonts.Default.height DIV 3 * 2;
+  eolW := Fonts.Default.height DIV 2;
+  END SetMetrics;
+
+  (** polpo: recompute the standard sizes after the fonts were scaled (Fonts.SetScale);
+    frames adopt them on Fonts.ScaleMsg. *)
+  PROCEDURE Rescale*;
+  BEGIN
+    oldLeft := left; oldRight := right; oldTop := top; oldBot := bot; oldLsp := lsp;
+    SetMetrics
+  END Rescale;
+
   PROCEDURE  Handle* (F: Objects.Object; VAR M: Objects.ObjMsg);
     VAR F1: Frame; u: Utf8.Char; n: INTEGER;
   BEGIN
@@ -1049,6 +1090,12 @@ END MulDiv;
       WITH M: Texts.UpdateMsg DO
           IF F.text = M.text THEN Update(F, M.beg, M.end, M.len) END
       END
+      ELSIF M IS Fonts.ScaleMsg THEN  (* polpo: fonts were scaled, adopt the new standard sizes; a restore follows *)
+        IF F.lsp = oldLsp THEN F.lsp := lsp END;
+        IF F.left = oldLeft THEN F.left := left END;
+        IF F.right = oldRight THEN F.right := right END;
+        IF F.top = oldTop THEN F.top := top END;
+        IF F.bot = oldBot THEN F.bot := bot END
       ELSIF M IS Oberon.InputMsg THEN
          WITH M: Oberon.InputMsg DO
           IF M.id = Oberon.track THEN Edit(F, M.X, M.Y, M.keys)
@@ -1252,22 +1299,7 @@ BEGIN
     MarkColor := Display.FG; BarColor := Display.FG; MenuBG := Display.FG; TextBG:= Display.BG;
     FullColor := Display.FG;  mode := invert
   END;
-  IF Modern THEN menuH := Fonts.Default.height + 8
-  ELSE menuH := Fonts.Default.height + 2
-  END;
-  barW := Fonts.Default.height + 2;
-  left := barW + Fonts.Default.height DIV 2;
-  right := Fonts.Default.height DIV 2;
-  IF Modern THEN top := Fonts.Default.height DIV 2 * 2 DIV 3
-  ELSE top := Fonts.Default.height DIV 2
-  END;
-  bot := Fonts.Default.height DIV 2;
-  asr := Fonts.Default.maxY;
-  dsr := -Fonts.Default.minY;
-  lsp := Fonts.Default.height;
-  selH := Fonts.Default.height;
-  markW := Fonts.Default.height DIV 3 * 2;
-  eolW := Fonts.Default.height DIV 2;
+  SetMetrics;
   Texts.OpenWriter(W); Texts.OpenWriter(KW);
   BoxPat[0] := {0..11}; 
   BoxPat[1] := {0, 11}; BoxPat[2] := {0, 11}; BoxPat[3] := {0, 11}; BoxPat[4] := {0, 11};

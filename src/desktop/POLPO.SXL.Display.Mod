@@ -240,6 +240,7 @@ TYPE
 VAR
   Unit*: LONGINT; (** RasterUnit = Unit/36000 mm *)
   Zoom*: LONGINT;  (** Zoom factor for HiDPI displays, currently only X11 with XShm *)
+  DPI*: INTEGER;  (** logical pixels per inch, 0 if unknown (not known for a terminal); used by Fonts *)
   Left*, (** Left margin of black-and-white screen. *)
   ColLeft*, (** Left margin of secondary display, often same as Left. *)
   Bottom*, (** Bottom of primary map. *)

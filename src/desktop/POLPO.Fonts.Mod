@@ -3,6 +3,9 @@ Refer to the license.txt file provided with this distribution. *)
 (*
     peter matthias
     2015-04-21  using portable version of GetCharObj, using Putx from ARM due to aligment restrictions in ARM
+    polpo: font scaling. scale (percent) maps a requested screen font of size n to the existing
+      font file nearest to n*scale/100, same family first; the font keeps its requested name,
+      so texts are stored unchanged. SetScale reloads loaded fonts; broadcast ScaleMsg afterwards.
   *)
 
 MODULE Fonts;  (** portable *) (*JG 16.3.94*)
@@ -12,7 +15,7 @@ The Module Fonts implement the Oberon font manager. Fonts are collections
 of characters, each character being a pattern and and metric data.
 *)
 
-  IMPORT SYSTEM, Kernel, Files, Objects, Display;
+  IMPORT SYSTEM, Linux0, Kernel, Files, Objects, Display, Root;
 
   CONST substitute* = -1; font* = 0; metric* = 1; (** Font types. *)
     TraceMissing = TRUE;  TraceAlias = FALSE;
@@ -39,11 +42,15 @@ of characters, each character being a pattern and and metric data.
       dx, x, y, w, h: INTEGER
     END;
     Boxes = POINTER TO ARRAY OF BoxRec;
+    ScaleMsg* = RECORD (Display.FrameMsg)  (** broadcast after SetScale: frames adapt their metrics *)
+      oldH*, newH*: INTEGER  (** height of the default font before and after *)
+    END;
 
   VAR FontId*: CHAR;  (** Initial character of font files (.Fnt). *)
       Default*: Font;  (** Default system screen font (typically Oberon10.Scn.Fnt). *)
       theChar: Char;
       conv: BOOLEAN;
+      scale*: INTEGER;  (** font scale in percent; 0 until decided *)
    
   PROCEDURE Put1 (VAR a: LONGINT; x: INTEGER);
   VAR y: SHORTINT;
@@ -225,39 +232,129 @@ of characters, each character being a pattern and and metric data.
     END
   END OpenFont;
 
+  (* Does the font file name exist in the current directory, fonts/ or <root>/fonts/? (quietly) *)
+  PROCEDURE Exists(VAR name: ARRAY OF CHAR): BOOLEAN;
+    VAR path: ARRAY 320 OF CHAR; i, j, k, fd, res: LONGINT;
+  BEGIN
+    k := 0;
+    WHILE k < 3 DO
+      i := 0;
+      IF k = 1 THEN path := "fonts/"; i := 6
+      ELSIF k = 2 THEN Root.Join("fonts/", path); WHILE path[i] # 0X DO INC(i) END
+      END;
+      j := 0; WHILE (name[j] # 0X) & (i < LEN(path)-1) DO path[i] := name[j]; INC(i); INC(j) END;
+      path[i] := 0X;
+      fd := Linux0.Openat0(Linux0.ATFDCWD, SYSTEM.ADR(path[0]), Linux0.ORDonly, 0);
+      IF fd > 0 THEN res := Linux0.Close0(fd); RETURN TRUE END;
+      INC(k)
+    END;
+    RETURN FALSE
+  END Exists;
+
+  (* Decide the scale if it is not set: the environment variable OFONTSCALE, else from the
+     screen resolution (Display.DPI, 96 dpi = 100%), else 100. *)
+  PROCEDURE DecideScale;
+    VAR s: ARRAY 16 OF CHAR; i, v: LONGINT;
+  BEGIN
+    IF scale = 0 THEN
+      Kernel.GetConfig("OFONTSCALE", s);
+      v := 0; i := 0;
+      WHILE (s[i] >= "0") & (s[i] <= "9") DO v := v*10 + ORD(s[i]) - ORD("0"); INC(i) END;
+      IF (v = 0) & (Display.DPI >= 120) THEN v := (LONG(Display.DPI)*100 DIV 96 + 12) DIV 25 * 25 END;
+      IF v < 50 THEN v := 100 ELSIF v > 800 THEN v := 800 END;
+      scale := SHORT(v)
+    END
+  END DecideScale;
+
+  (* name of a screen font "<family><size><style>.Scn.Fnt": the name of the existing font file
+     of the same family and style nearest to size*scale/100, within a quarter of that size.
+     found is FALSE if there is none, or if name is not a scaled screen font. *)
+  PROCEDURE ScaledName(VAR name, sname: ARRAY OF CHAR; VAR found: BOOLEAN);
+    VAR i, j, k, n, size, target, tol, d, cand: LONGINT; rest: ARRAY 32 OF CHAR;
+  BEGIN
+    found := FALSE; DecideScale;
+    IF scale = 100 THEN RETURN END;
+    i := 0; WHILE (CAP(name[i]) >= "A") & (CAP(name[i]) <= "Z") DO INC(i) END;
+    j := i; size := 0;
+    WHILE (name[j] >= "0") & (name[j] <= "9") DO size := size*10 + ORD(name[j]) - ORD("0"); INC(j) END;
+    IF (i = 0) OR (size = 0) THEN RETURN END;
+    k := 0; WHILE (name[j] # 0X) & (k < LEN(rest)-1) DO rest[k] := name[j]; INC(j); INC(k) END;
+    rest[k] := 0X;
+    IF (k < 8) OR (rest[k-8] # ".") OR (rest[k-7] # "S") OR (rest[k-6] # "c") OR (rest[k-5] # "n") THEN RETURN END;
+    target := (size*scale + 50) DIV 100; tol := target DIV 4 + 1; d := 0;
+    WHILE ~found & (d <= tol) DO
+      n := 0;
+      WHILE ~found & (n < 2) DO
+        IF n = 0 THEN cand := target + d ELSE cand := target - d END;
+        IF (cand > 0) & ((n = 0) OR (d > 0)) THEN
+          COPY(name, sname); k := i;  (* family, then size, then the rest *)
+          IF cand >= 100 THEN sname[k] := CHR(cand DIV 100 + ORD("0")); INC(k) END;
+          IF cand >= 10 THEN sname[k] := CHR(cand DIV 10 MOD 10 + ORD("0")); INC(k) END;
+          sname[k] := CHR(cand MOD 10 + ORD("0")); INC(k);
+          j := 0; WHILE rest[j] # 0X DO sname[k] := rest[j]; INC(k); INC(j) END;
+          sname[k] := 0X;
+          found := Exists(sname)
+        END;
+        INC(n)
+      END;
+      INC(d)
+    END
+  END ScaledName;
+
+  (* OpenFont, with scaling the scaled font file if there is one near enough, else NIL *)
+  PROCEDURE OpenScaled(VAR name: ARRAY OF CHAR; VAR f: Files.File; scaled: BOOLEAN);
+    VAR sname: Objects.Name; found: BOOLEAN;
+  BEGIN
+    IF scaled THEN
+      ScaledName(name, sname, found);
+      IF found THEN OpenFont(sname, f) ELSE f := NIL END
+    ELSE OpenFont(name, f)
+    END
+  END OpenScaled;
+
+  (* Find the font file of L: its name, the Default alias, or Syntax as Oberon. *)
+  PROCEDURE Resolve (L: Font; VAR f: Files.File; scaled: BOOLEAN);
+  VAR i, j: LONGINT; name: Objects.Name;
+  BEGIN
+    OpenScaled(L.name, f, scaled);
+    IF f = NIL THEN
+      COPY(L.name, name);  name[7] := 0X;
+      IF name = "Default" THEN
+        IF TraceAlias THEN Kernel.WriteString(L.name);  Kernel.WriteString(" -> ") END;
+        IF Default # NIL THEN COPY(Default.name, name) ELSE name := "Oberon10.Scn.Fnt" END;
+        i := 0;  WHILE (name[i] # 0X) & ((name[i] < "0") OR (name[i] > "9")) DO INC(i) END;
+        j := 7;  WHILE L.name[j] # 0X DO name[i] := L.name[j];  INC(i);  INC(j) END;
+        name[i] := 0X;
+        IF TraceAlias THEN Kernel.WriteString(name);  Kernel.WriteLn END;
+        COPY(name, L.name);
+        OpenScaled(name, f, scaled)
+      ELSE
+        name[6] := 0X;
+        IF conv & (name = "Syntax") THEN
+          IF TraceAlias THEN Kernel.WriteString(L.name);  Kernel.WriteString(" -> ") END;
+          IF Default # NIL THEN name := Default.name ELSE name := "Oberon10.Scn.Fnt" END;  (* polpo: Default may not be set yet *)
+          j := 0;  WHILE (name[j] # 0X) & ((name[j] < "0") OR (name[j] > "9")) DO INC(j) END;
+          i := 6;  WHILE (L.name[i] >= "0") & (L.name[i] <= "9") DO name[j] := L.name[i];  INC(i);  INC(j) END;
+          IF L.name[i] = "m" THEN name[j] := "b";  INC(i);  INC(j) END;  (* Syntax medium -> Oberon bold *)
+          WHILE L.name[i] # 0X DO name[j] := L.name[i];  INC(i);  INC(j) END;
+          name[j] := 0X;
+          IF TraceAlias THEN Kernel.WriteString(name);  Kernel.WriteLn END;
+          COPY(name, L.name);
+          OpenScaled(name, f, scaled)
+        END
+      END
+    END
+  END Resolve;
+
   PROCEDURE *Load (L: Objects.Library);
-  VAR f: Files.File; R: Files.Rider; id: CHAR; i, j: LONGINT;
+  VAR f: Files.File; R: Files.Rider; id: CHAR; i: LONGINT;
       name: Objects.Name;
   BEGIN
     WITH L: Font DO
-      OpenFont(L.name, f);
-      IF f = NIL THEN
-        COPY(L.name, name);  name[7] := 0X;
-        IF name = "Default" THEN
-          IF TraceAlias THEN Kernel.WriteString(L.name);  Kernel.WriteString(" -> ") END;
-          COPY(Default.name, name);
-          i := 0;  WHILE (name[i] # 0X) & ((name[i] < "0") OR (name[i] > "9")) DO INC(i) END;
-          j := 7;  WHILE L.name[j] # 0X DO name[i] := L.name[j];  INC(i);  INC(j) END;
-          name[i] := 0X;
-          IF TraceAlias THEN Kernel.WriteString(name);  Kernel.WriteLn END;
-          COPY(name, L.name);
-          OpenFont(name, f)
-        ELSE
-          name[6] := 0X;
-          IF conv & (name = "Syntax") THEN
-            IF TraceAlias THEN Kernel.WriteString(L.name);  Kernel.WriteString(" -> ") END;
-            name := Default.name;
-            j := 0;  WHILE (name[j] # 0X) & ((name[j] < "0") OR (name[j] > "9")) DO INC(j) END;
-            i := 6;  WHILE (L.name[i] >= "0") & (L.name[i] <= "9") DO name[j] := L.name[i];  INC(i);  INC(j) END;
-            IF L.name[i] = "m" THEN name[j] := "b";  INC(i);  INC(j) END;  (* Syntax medium -> Oberon bold *)
-            WHILE L.name[i] # 0X DO name[j] := L.name[i];  INC(i);  INC(j) END;
-            name[j] := 0X;
-            IF TraceAlias THEN Kernel.WriteString(name);  Kernel.WriteLn END;
-            COPY(name, L.name);
-            OpenFont(name, f)
-          END
-        END
-      END;
+      DecideScale;
+      f := NIL;
+      IF scale # 100 THEN Resolve(L, f, TRUE) END;  (* scaled font file, if there is one *)
+      IF f = NIL THEN Resolve(L, f, FALSE) END;
       IF f # NIL THEN
         Files.Set(R, f, 0); Files.Read(R, id);
         IF id = FontId THEN Files.Read(R, L.type);
@@ -277,6 +374,23 @@ of characters, each character being a pattern and and metric data.
       END
     END
   END Load;
+
+  PROCEDURE ReloadFont (L: Objects.Library);
+  BEGIN
+    IF (L # NIL) & (L IS Font) & (L(Font).type # substitute) THEN Load(L) END
+  END ReloadFont;
+
+  (** Set the font scale in percent and reload all loaded fonts at the new scale. Broadcast a
+    ScaleMsg afterwards, so that frames lay out their texts again. *)
+  PROCEDURE SetScale* (percent: INTEGER);
+  BEGIN
+    IF percent < 50 THEN percent := 50 ELSIF percent > 800 THEN percent := 800 END;
+    IF percent # scale THEN
+      scale := percent;
+      ReloadFont(Default);
+      Objects.Enumerate(ReloadFont)
+    END
+  END SetScale;
 
 (** Load and cache a font. *)
   PROCEDURE This* (name: ARRAY OF CHAR): Font;
@@ -298,6 +412,7 @@ of characters, each character being a pattern and and metric data.
     FontId := Objects.LibBlockId; NEW(theChar);
     Kernel.GetConfig("FontConv", s);
     conv := s[0] # "0";
+    scale := 0;
     Objects.Register("Fnt", New)
   END Init;
   
