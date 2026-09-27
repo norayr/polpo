@@ -16,27 +16,31 @@ This is an attempt to contunie development of ETH Linux Oberon in some way.
 
 ## How to play
 
-Type `make` and `wishup` shell will load object files from x86 directory and rebuild link itself as static Linux binary.
+`bin/x86/loksh` is the statically linked x86 console. It loads the object files from
+`obj/x86/`; `make` rebuilds the whole system with it (`tools/build.Tool`) and links
+`bin/x86/loksh2`.
 
 Look at [compiler options](compiler_options.md) or do
 
 ```
-./wishup nXCompiler.Help
+bin/x86/loksh compiler.Help
 ```
 
-Compile hello world example:
+Compile the hello world example:
 
 ```
-./wishup nXCompiler.Compile hello.Mod
+bin/x86/loksh compiler.Compile hello.Mod
 ```
 
 Run:
 
 ```
-./wishup hello.world
+bin/x86/loksh hello.world
 ```
 
-Show an Oberon text on the terminal, with its colours, or only its characters:
+Show an Oberon text on the terminal, with its styles and colours, or only its characters.
+Bold and italic fonts are shown bold and italic, larger sizes (headings) bold and
+underlined, with the terminal's own font:
 
 ```
 bin/x86/loksh texts.Show texts/UserGuide.Text
@@ -48,13 +52,14 @@ deprecated.
 
 ### X11 Oberon
 
-Currently whole Oberon system gets build with minimal set of modules. So after you built with `make` you will find `xoberon` binary.
+The same `bin/x86/loksh` starts the whole Oberon desktop:
 
 ```
-./xoberon
+bin/x86/loksh System.Init
 ```
 
-That is a statically linked x86 executable that will start loading modules and form whole Oberon operating system.
+It loads the desktop modules from `obj/x86/` and forms the whole Oberon operating system.
+`OWIDTH` and `OHEIGHT` set the size of the window.
 
 Now it can draw itself in an X11 window.
 But wait, it can also draw itself in other ways! Just replace the Display module.
@@ -74,7 +79,7 @@ This will replace compiled Display.Obj and Input.Obj with the versions that work
 
 After that we suggest to use supplied `run.vt.sh` script that will open a conveniently big xterm and load oberon that would draw itself in it.
 
-Same xoberon binary (no need for recompilation) will load modules, including Display and Input(but those are different Display and Input now), and the OS will now work in the terminal.
+The same `bin/x86/loksh` (no need for relinking) will load modules, including Display and Input(but those are different Display and Input now), and the OS will now work in the terminal.
 
 Since Oberon now draws itself in the VT320 capable Unix terminal, you can also run it via ssh.
 
