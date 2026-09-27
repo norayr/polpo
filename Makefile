@@ -13,6 +13,12 @@ ARM = qemu-arm bin/arm/loksh
 ACOMPILE = $(X86) acompiler.Compile
 endif
 
+ifneq ($(filter riscv32,$(HOSTARCH)),)
+RISCV = bin/riscv/loksh
+else
+RISCV = qemu-riscv32 bin/riscv/loksh
+endif
+
 # ---- x86 ----
 
 fast:
@@ -55,4 +61,24 @@ arm-x11:
 		$(ACOMPILE) /x src/desktop/POLPO.Display.Mod
 		$(ACOMPILE) /s src/desktop/POLPO.Input.Mod
 
-.PHONY: fast sixel x11 arm arm-native arm-run arm-shell arm-sixel arm-x11
+# ---- RISC-V (RV32) ----
+
+# cross compile the RISC-V system on x86
+riscv:
+		$(X86) < tools/riscv-cross.Tool
+		$(X86) < tools/riscv.Tool
+		mv bin/riscv/loksh.new bin/riscv/loksh
+
+# build the RISC-V system with the RISC-V compiler: natively on RV32, under qemu-riscv32 elsewhere
+riscv-native:
+		$(RISCV) < tools/riscv.Tool
+		mv bin/riscv/loksh.new bin/riscv/loksh
+
+# start the RISC-V desktop / console (qemu-riscv32 unless this machine is RV32)
+riscv-run:
+		$(RISCV) System.Init
+
+riscv-shell:
+		$(RISCV)
+
+.PHONY: fast sixel x11 arm arm-native arm-run arm-shell arm-sixel arm-x11 riscv riscv-native riscv-run riscv-shell

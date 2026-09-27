@@ -111,6 +111,24 @@ On ARM, `compiler.Compile` and `linker.Link` are the ARM compiler and boot
 linker. `make arm-sixel` and `make arm-x11` switch the ARM Display and Input
 modules, like `make sixel` and `make x11` for x86.
 
+### RISC-V
+
+polpo runs on 32-bit RISC-V (RV32) Linux too. The compiler is OLR's OP2-based
+ROP2 compiler (shared front end `ROPM`..`ROPP`, RISC-V back end `VOPL`..`VOPV`).
+Object files are in `obj/riscv/`, the static executable is `bin/riscv/loksh`.
+
+```
+make riscv          # on x86: cross compile the RISC-V system
+make riscv-native   # rebuild it with the RISC-V compiler (on x86: under qemu-riscv32)
+make riscv-run      # start the RISC-V desktop (System.Init); on x86 through qemu-riscv32
+make riscv-shell    # RISC-V console
+```
+
+`make riscv` runs `tools/riscv-cross.Tool` (the x86-hosted `rvcompiler` and
+`rvlinker`) and then `tools/riscv.Tool`. On RISC-V, `compiler.Compile` and
+`linker.Link` are the RISC-V compiler and boot linker. The runtime uses the
+Linux RV32 system calls (64-bit time, statx).
+
 ### Layout
 
 * `bin/<arch>/loksh` - static executables; run them from the polpo directory
@@ -119,8 +137,8 @@ modules, like `make sixel` and `make x11` for x86.
   (Linux0, Kernel, Modules0), compiler and linker of that architecture
 * `src/common` - modules shared by console and desktop (Files, Texts0, Oberon0, ...)
 * `src/desktop` - desktop modules shared by all architectures; `src/desktop/<arch>` -
-  architecture dependent desktop tools (XCompiler, ACompiler, decoders, browsers)
-* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool` and `arm.Tool`
+  architecture dependent desktop modules (XCompiler, ACompiler, RCompiler, decoders, browsers, System on RISC-V)
+* `tools/` - `.Tool` texts, including the build recipes `build.Tool`, `arm-cross.Tool`, `arm.Tool`, `riscv-cross.Tool` and `riscv.Tool`
 * `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
 * `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
 

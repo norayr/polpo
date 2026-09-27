@@ -92,3 +92,15 @@ compiler.Compile /s src/cli/arm/OBP.Mod
 compiler.Compile /s src/desktop/arm/ACompiler.Mod
 compiler.Compile /s src/desktop/arm/ADecoder.Mod
 compiler.Compile /s src/desktop/arm/ABrowser.Mod
+
+# RISC-V cross tools in the desktop (RISC-V toolchain itself: make riscv)
+compiler.Compile /s src/cli/riscv/ROPM.Mod
+compiler.Compile /s src/cli/riscv/ROPS.Mod
+compiler.Compile /s src/cli/riscv/ROPT.Mod
+compiler.Compile /s src/cli/riscv/ROPB.Mod
+compiler.Compile /s src/cli/riscv/ROPP.Mod
+compiler.Compile /s src/cli/riscv/VOPL.Mod
+compiler.Compile /s src/cli/riscv/VOPC.Mod
+compiler.Compile /s src/cli/riscv/VOPV.Mod
+compiler.Compile /s src/desktop/riscv/RCompiler.Mod
+compiler.Compile /s src/desktop/riscv/VDecoder.Mod
