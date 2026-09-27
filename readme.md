@@ -60,8 +60,8 @@ bin/x86/loksh texts.DeleteLines tools/System.Tool wishup.Tool
 
 `texts.Replace file old new` replaces every occurrence; the new text keeps the font and
 colour of the old, and `""` as new deletes. `texts.DeleteLines file text` deletes every
-line containing the text. Texts with spaces or digits are quoted (in the Unix shell as
-`'"..."'`). The file is stored where it was found, the old version as `.Bak`; an Oberon
+line containing the text. Arguments are words separated by blanks, any file name works;
+texts with blanks are quoted (in the Unix shell as `'"..."'`). The file is stored where it was found, the old version as `.Bak`; an Oberon
 text keeps its fonts and colours, a plain file stays plain. Texts with objects (gadgets)
 are left alone.
 

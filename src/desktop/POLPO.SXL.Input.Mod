@@ -74,6 +74,7 @@ TYPE
         value: LONGINT;
   END;
 
+  Chars* = POINTER TO ARRAY OF CHAR;  (* polpo: selection and clipboard text *)
   Event= RECORD
         code, detail: CHAR;
         sequence: INTEGER;
@@ -123,7 +124,7 @@ CONST
   None= 0;
 
 VAR
-  clip*: POINTER TO ARRAY OF CHAR;  (* clipboard *)
+  clip*: Chars;  (* clipboard *)
   dfd: LONGINT;  (* Display Filedescriptor (X11 socket or /dev/fb0 *)
   mouseX, mouseY: INTEGER;
   keyss, keyState: SET;

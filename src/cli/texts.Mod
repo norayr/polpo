@@ -223,6 +223,33 @@ BEGIN
   IF rich & (curBold OR curItalic OR (curCol # 15)) THEN Attr(0) END
 END ShowFile;
 
+(* Command arguments are words separated by blanks, or "texts with blanks". Unlike the
+   Scanner, words may contain any character (file names with "-", numbers) and be long. *)
+PROCEDURE OpenArgs(VAR R: Reader);
+BEGIN OpenReader(R, Oberon.Par.text, Oberon.Par.pos)
+END OpenArgs;
+
+(* the next argument in s; FALSE at the end of the arguments ("~" or the end of the line) or when it is too long *)
+PROCEDURE Arg(VAR R: Reader; VAR s: ARRAY OF CHAR): BOOLEAN;
+VAR ch: CHAR; i: LONGINT; quoted: BOOLEAN;
+BEGIN
+  Read(R, ch);
+  WHILE ~R.eot & ((ch = " ") OR (ch = 09X)) DO Read(R, ch) END;
+  IF R.eot OR (ch = "~") OR (ch = 0DX) OR (ch = 0AX) THEN s[0] := 0X; RETURN FALSE END;  (* the line ends the arguments *)
+  quoted := ch = 22X; IF quoted THEN Read(R, ch) END;
+  i := 0;
+  WHILE ~R.eot & (ch # 0DX) & (ch # 0AX) & (quoted & (ch # 22X) OR ~quoted & (ch # " ") & (ch # 09X)) DO
+    IF i >= LEN(s) - 1 THEN
+      s[i] := 0X; out.String("texts: argument too long (at most "); out.Int(LEN(s) - 1, 0);
+      out.String(" characters): "); out.String(s); out.String("..."); out.Ln;
+      RETURN FALSE
+    END;
+    s[i] := ch; INC(i); Read(R, ch)
+  END;
+  s[i] := 0X;
+  RETURN TRUE
+END Arg;
+
 (* ----- editing texts from the console ----- *)
 
 (* position of the first occurrence of pat at or after pos in T, or -1 *)
@@ -291,20 +318,14 @@ END StoreEdit;
   file, "" as new deletes. The new text gets the font and colour of the old. The file is
   stored, its old version kept as .Bak; a plain ASCII file stays plain. *)
 PROCEDURE Replace*;
-VAR S: Scanner; name, old, new: ARRAY 64 OF CHAR; T: Text; R: Reader; W: Writer;
+VAR A: Reader; name, old, new: ARRAY 256 OF CHAR; T: Text; R: Reader; W: Writer;
   ch: CHAR; plain: BOOLEAN; pos, oldlen, newlen, n: LONGINT;
 BEGIN
-  OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Scan(S);
-  IF ~(S.class IN {Name, String}) THEN out.String("usage: texts.Replace file old new ~"); out.Ln; RETURN END;
-  COPY(S.s, name); Scan(S);
-  IF ~(S.class IN {Name, String}) THEN
-    out.String("texts.Replace: old text missing, quote texts with spaces or digits"); out.Ln; RETURN
+  OpenArgs(A);
+  IF ~Arg(A, name) OR ~Arg(A, old) OR ~Arg(A, new) THEN  (* deleting needs an explicit "" *)
+    out.String("usage: texts.Replace file old new ~   (quote texts with blanks)"); out.Ln; RETURN
   END;
-  COPY(S.s, old); Scan(S);
-  IF ~(S.class IN {Name, String}) THEN  (* deleting needs an explicit "" *)
-    out.String("texts.Replace: new text missing, quote texts with spaces or digits"); out.Ln; RETURN
-  END;
-  COPY(S.s, new);
+  IF old = "" THEN out.String("texts.Replace: old text is empty"); out.Ln; RETURN END;
   IF OpenEdit(name, T, plain) THEN
     oldlen := 0; WHILE old[oldlen] # 0X DO INC(oldlen) END;
     newlen := 0; WHILE new[newlen] # 0X DO INC(newlen) END;
@@ -324,16 +345,13 @@ END Replace;
 (** texts.DeleteLines file "text" ~ -- delete every line of the text file that contains
   text. The file is stored like with texts.Replace. *)
 PROCEDURE DeleteLines*;
-VAR S: Scanner; name, pat: ARRAY 64 OF CHAR; T: Text; R: Reader; ch: CHAR; plain: BOOLEAN;
+VAR A: Reader; name, pat: ARRAY 256 OF CHAR; T: Text; R: Reader; ch: CHAR; plain: BOOLEAN;
   beg, end, m, n: LONGINT;
 BEGIN
-  OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Scan(S);
-  IF ~(S.class IN {Name, String}) THEN out.String("usage: texts.DeleteLines file text ~"); out.Ln; RETURN END;
-  COPY(S.s, name); Scan(S);
-  IF ~(S.class IN {Name, String}) THEN
-    out.String("texts.DeleteLines: text missing, quote texts with spaces or digits"); out.Ln; RETURN
+  OpenArgs(A);
+  IF ~Arg(A, name) OR ~Arg(A, pat) OR (pat = "") THEN
+    out.String("usage: texts.DeleteLines file text ~   (quote texts with blanks)"); out.Ln; RETURN
   END;
-  COPY(S.s, pat);
   IF OpenEdit(name, T, plain) THEN
     n := 0; beg := 0; m := Find(T, 0, pat);
     WHILE m >= 0 DO
@@ -351,10 +369,10 @@ BEGIN
 END DeleteLines;
 
 PROCEDURE ShowFiles(rich: BOOLEAN);
-VAR S: Scanner;
+VAR R: Reader; name: ARRAY 256 OF CHAR;
 BEGIN
-  OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Scan(S);
-  WHILE S.class IN {Name, String} DO ShowFile(S.s, rich); Scan(S) END
+  OpenArgs(R);
+  WHILE Arg(R, name) DO ShowFile(name, rich) END
 END ShowFiles;
 
 (** texts.Show file... -- show texts with their fonts and colours *)

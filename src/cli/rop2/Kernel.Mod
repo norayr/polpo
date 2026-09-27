@@ -1460,7 +1460,7 @@ BEGIN
     m:=0;
     REPEAT
       SYSTEM.GET( l, c);
-      val[m]:=c;
+      IF m < LEN(val)-1 THEN val[m]:=c ELSE val[m]:=0X; c:=0X END;  (* polpo: long arguments are cut *)
       INC(l);
       INC(m);
     UNTIL (c=0X);
@@ -1501,7 +1501,7 @@ BEGIN  (* stack layout at http://asm.sourceforge.net/articles/startup.html *)
       REPEAT
         INC(n);
         SYSTEM.GET(n, ch);
-        val[j]:=ch; INC(j);
+        IF j < LEN(val)-1 THEN val[j]:=ch ELSE val[j]:=0X; ch:=0X END; INC(j);  (* polpo: long values are cut *)
       UNTIL ch=0X;
       WriteString(val); WriteLn;
       RETURN;
