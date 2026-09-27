@@ -134,9 +134,10 @@ shown larger with the real Syntax and Oberon bitmap fonts. The scale is in perce
 
 A text asking for `Syntax10.Scn.Fnt` gets the existing font nearest to 10 * scale / 100,
 of the same family if possible (at 200% the real Syntax20), else of the Oberon family.
-Texts keep their font names, so documents are stored unchanged. `LineSpacing = 150` in
-the `System` section (percent of the font height, default 150) sets the spacing of lines
-in text viewers.
+Texts keep their font names, so documents are stored unchanged. In text viewers each
+line is as high as the largest font on it, so headings get their full size;
+`LineSpacing = 150` in the `System` section (percent of each line's height, default 150)
+sets the spacing of lines.
 
 How `Oberon.Text` is read, and how your own programs can keep settings there, is
 described in [texts.md](texts.md).

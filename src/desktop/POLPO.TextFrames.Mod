@@ -31,6 +31,7 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
       len: LONGINT;
         wid: INTEGER;
         eot: BOOLEAN;
+        asr, dsr, h: INTEGER;  (* polpo: ascent, descent and height of the largest font of the line *)
         next: Line
     END;
 
@@ -65,6 +66,7 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
     menuH*, barW*, left*, right*, top*, bot*, lsp*: INTEGER; (*standard sizes*)
     MarkColor, BarColor, MenuBG, TextBG, FullColor, mode: INTEGER;
     asr, dsr, selH, markW, eolW: INTEGER;
+    spacing: LONGINT;  (* polpo: line spacing in percent of the line height, System.LineSpacing *)
     oldLeft, oldRight, oldTop, oldBot, oldLsp: INTEGER;  (* standard sizes before Rescale *)
     ch: CHAR;
     utfBuf: ARRAY 4 OF CHAR; utfLen, utfExp: INTEGER;
@@ -177,6 +179,65 @@ END MulDiv;
     L.eot := R.eot; Texts.Read(R, ch)
   END DisplayLine;
 
+  (* polpo: lines have the height of their largest font.
+     The baseline of L.next is Step(L) below the one of L: the descent of L, the gap below L
+     (System.LineSpacing percent of its height) and the ascent of L.next. *)
+
+  (* metrics of the line starting at the current character ch of R; R and ch are unchanged *)
+  PROCEDURE MeasureLine (VAR R: Texts.Reader; L: Line);
+    VAR R1: Texts.Reader; c: CHAR; f: Fonts.Font;
+  BEGIN
+    R1 := R; c := ch; L.asr := 0; L.dsr := 0; L.h := 0;
+    LOOP
+      IF (R1.lib # NIL) & (R1.lib IS Fonts.Font) THEN
+        f := R1.lib(Fonts.Font);
+        IF f.maxY > L.asr THEN L.asr := f.maxY END;
+        IF -f.minY > L.dsr THEN L.dsr := -f.minY END;
+        IF f.height > L.h THEN L.h := f.height END
+      END;
+      IF (c = CR) OR (R1.lib = NIL) THEN EXIT END;
+      Texts.Read(R1, c)
+    END;
+    IF L.h = 0 THEN L.asr := asr; L.dsr := dsr; L.h := Fonts.Default.height END
+  END MeasureLine;
+
+  PROCEDURE Gap (L: Line): INTEGER;
+    VAR g: INTEGER;
+  BEGIN
+    g := SHORT(L.h * spacing DIV 100) - L.asr - L.dsr;
+    IF g < 0 THEN g := 0 END;
+    RETURN g
+  END Gap;
+
+  PROCEDURE Step (L: Line): INTEGER;
+  BEGIN RETURN L.dsr + Gap(L) + L.next.asr
+  END Step;
+
+  (* append the lines of R after L (with baseline y, or L = F.trailer), as long as they fit *)
+  PROCEDURE Fill (F: Frame; L: Line; y: INTEGER; VAR R: Texts.Reader);
+    VAR N: Line; ny: INTEGER;
+  BEGIN
+    LOOP
+      IF L.eot THEN EXIT END;
+      NEW(N); MeasureLine(R, N);
+      IF L = F.trailer THEN ny := F.Y + F.H - F.top - N.asr ELSE ny := y - L.dsr - Gap(L) - N.asr END;
+      IF ny - N.dsr < F.Y + F.bot THEN EXIT END;
+      L.next := N; L := N; y := ny;
+      DisplayLine(F, L, R, F.X + F.left, y, 0)
+    END;
+    L.next := F.trailer
+  END Fill;
+
+  (* the last line shown and its baseline y; F.trailer if none *)
+  PROCEDURE LastLine (F: Frame; VAR L: Line; VAR org: LONGINT; VAR y: INTEGER);
+  BEGIN
+    L := F.trailer; org := F.org; y := 0;
+    WHILE L.next # F.trailer DO
+      IF L = F.trailer THEN y := F.Y + F.H - F.top - L.next.asr ELSE y := y - Step(L) END;
+      L := L.next; org := org + L.len
+    END
+  END LastLine;
+
   PROCEDURE Validate (T: Texts.Text; VAR org: LONGINT);
     VAR R: Texts.Reader; pos: LONGINT;
   BEGIN
@@ -215,7 +276,7 @@ END MulDiv;
   END DrawIcon;
   
   PROCEDURE Restore* (F: Frame);
-    VAR R: Texts.Reader; L: Line; curY, botY: INTEGER;
+    VAR R: Texts.Reader;
   BEGIN (*F.mark = 0*)
     Display.ReplConst(F.col, F.X, F.Y, F.W, F.H, replace);
     IF F.left >= barW THEN
@@ -224,15 +285,8 @@ END MulDiv;
       DrawIcon(F)
     END;
     Validate(F.text, F.org);
-    botY := F.Y + F.bot + dsr;
     Texts.OpenReader(R, F.text, F.org); Texts.Read(R, ch);
-    L := F.trailer; curY := F.Y + F.H - F.top - asr;
-    WHILE ~L.eot & (curY >= botY) DO
-      NEW(L.next); L := L.next;
-      DisplayLine(F, L, R, F.X + F.left, curY, 0);
-      curY := curY - lsp
-    END;
-    L.next := F.trailer;
+    F.trailer.next := F.trailer; Fill(F, F.trailer, 0, R);
     F.markH := SHORT(MulDiv(F.org , F.H, (F.text.len + 1)))
   END Restore;
 
@@ -243,7 +297,7 @@ END MulDiv;
 
   PROCEDURE Extend* (F: Frame; newY: INTEGER);
     VAR R: Texts.Reader; L: Line;
-    org: LONGINT; curY, botY: INTEGER;
+    org: LONGINT; curY: INTEGER;
   BEGIN (*F.mark = 0*)
     Display.ReplConst(F.col, F.X, newY, F.W, F.Y - newY, replace);
     IF F.left >= barW THEN
@@ -253,41 +307,35 @@ END MulDiv;
     END;
     F.H := F.H + F.Y - newY; F.Y := newY;
     IF F.trailer.next = F.trailer THEN Validate(F.text, F.org) END;
-    L := F.trailer; org := F.org; curY := F.Y + F.H - F.top - asr;
-    WHILE L.next # F.trailer DO
-      L := L.next; org := org + L.len; curY := curY - lsp
-    END;
-    botY := F.Y + F.bot + dsr;
+    LastLine(F, L, org, curY);
     Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
-    WHILE ~L.eot & (curY >= botY) DO
-      NEW(L.next); L := L.next;
-      DisplayLine(F, L, R, F.X + F.left, curY, 0);
-      curY := curY - lsp
-    END;
-    L.next := F.trailer;
+    Fill(F, L, curY, R);
     F.markH := SHORT(MulDiv(F.org, F.H, (F.text.len + 1)))
   END Extend;
 
   PROCEDURE Reduce* (F: Frame; newY: INTEGER);
-    VAR L: Line; curY, botY: INTEGER;
+    VAR L: Line; curY, ny, top: INTEGER;
   BEGIN (*F.mark = 0*)
     F.H := F.H + F.Y - newY; F.Y := newY;
-    botY := F.Y + F.bot + dsr;
-    L := F.trailer; curY := F.Y + F.H - F.top - asr;
-    WHILE (L.next # F.trailer) & (curY >= botY) DO
-      L := L.next; curY := curY - lsp
+    L := F.trailer; curY := 0;
+    LOOP
+      IF L.next = F.trailer THEN EXIT END;
+      IF L = F.trailer THEN ny := F.Y + F.H - F.top - L.next.asr ELSE ny := curY - Step(L) END;
+      IF ny - L.next.dsr < F.Y + F.bot THEN EXIT END;
+      L := L.next; curY := ny
     END;
     L.next := F.trailer;
-    IF curY + asr > F.Y THEN
-      Display.ReplConst(F.col, F.X + F.left, F.Y, F.W - F.left, curY + asr - F.Y, replace)
+    IF L = F.trailer THEN top := F.Y + F.H ELSE top := curY - L.dsr END;
+    IF top > F.Y THEN
+      Display.ReplConst(F.col, F.X + F.left, F.Y, F.W - F.left, top - F.Y, replace)
     END;
     F.markH := SHORT(MulDiv(F.org, F.H, (F.text.len + 1)));
     Mark(F, 1)
   END Reduce;
 
   PROCEDURE ShowOrg (F: Frame; pos: LONGINT);
-    VAR R: Texts.Reader; L: Line;
-      org: LONGINT; curY, botY, Y0: INTEGER;
+    VAR R: Texts.Reader; L, first: Line;
+      org: LONGINT; curY, botY, Y0, shift: INTEGER;
   BEGIN
     IF F.trailer.next # F.trailer THEN Validate(F.text, pos);
       IF pos < F.org THEN Mark(F, 0);
@@ -296,29 +344,26 @@ END MulDiv;
         F.org := pos; F.trailer.next := F.trailer; Extend(F, botY);
         Mark(F, 1)
       ELSIF pos > F.org THEN
-        org := F.org; L := F.trailer.next; curY := F.Y + F.H - F.top - asr;
+        org := F.org; L := F.trailer.next; curY := F.Y + F.H - F.top - L.asr;
         WHILE (L.next # F.trailer) & (org # pos) DO
-          org := org + L.len; L := L.next; curY := curY - lsp;
+          org := org + L.len; curY := curY - Step(L); L := L.next
         END;
         IF org = pos THEN
-          F.org := org; F.trailer.next := L; Y0 := curY;
+          F.org := org; F.trailer.next := L; Y0 := curY; first := L;
+          shift := F.Y + F.H - F.top - L.asr - Y0;  (* the new first line moves up to the top *)
           WHILE L.next # F.trailer DO
-            org := org + L.len; L := L.next; curY := curY - lsp
+            org := org + L.len; curY := curY - Step(L); L := L.next
           END;
           Display.CopyBlock
-            (F.X + F.left, curY - dsr, F.W - F.left, Y0 + asr - (curY - dsr),
-            F.X + F.left, curY - dsr + F.Y + F.H - F.top - asr - Y0, replace);
-          curY := curY + F.Y + F.H - F.top - asr - Y0;
-          Display.ReplConst(F.col, F.X + F.left, F.Y, F.W - F.left, curY - dsr - F.Y, replace);
-          botY := F.Y + F.bot + dsr;
-          org := org + L.len; curY := curY - lsp;
-          Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
-          WHILE ~L.eot & (curY >= botY) DO
-            NEW(L.next); L := L.next;
-            DisplayLine(F, L, R, F.X + F.left, curY, 0);
-            curY := curY - lsp
+            (F.X + F.left, curY - L.dsr, F.W - F.left, Y0 + first.asr - (curY - L.dsr),
+            F.X + F.left, curY - L.dsr + shift, replace);
+          curY := curY + shift;
+          IF curY - L.dsr > F.Y THEN
+            Display.ReplConst(F.col, F.X + F.left, F.Y, F.W - F.left, curY - L.dsr - F.Y, replace)
           END;
-          L.next := F.trailer;
+          org := org + L.len;
+          Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
+          Fill(F, L, curY, R);
           UpdateMark(F)
         ELSE Mark(F, 0);
           Display.ReplConst(F.col, F.X + F.left, F.Y, F.W - F.left, F.H, replace);
@@ -354,9 +399,9 @@ END MulDiv;
   PROCEDURE LocateLine (F: Frame; y: INTEGER; VAR loc: Location);
     VAR L: Line; org: LONGINT; cury: INTEGER;
   BEGIN
-    org := F.org; L := F.trailer.next; cury := F.H - F.top - asr; 
-    WHILE (L.next # F.trailer) & (cury > y + dsr) DO
-      org := org + L.len; L := L.next; cury := cury - lsp
+    org := F.org; L := F.trailer.next; cury := F.H - F.top - L.asr;
+    WHILE (L.next # F.trailer) & (cury - L.dsr - Gap(L) DIV 2 > y) DO
+      org := org + L.len; cury := cury - Step(L); L := L.next
     END;
     loc.org := org; loc.lin := L; loc.y := cury
   END LocateLine;
@@ -446,9 +491,9 @@ END MulDiv;
   PROCEDURE LocatePos (F: Frame; pos: LONGINT; VAR loc: Location);
     VAR R: Texts.Reader; L: Line; org: LONGINT; cury: INTEGER;  
   BEGIN
-    org := F.org; L := F.trailer.next; cury := F.H - F.top - asr;
+    org := F.org; L := F.trailer.next; cury := F.H - F.top - L.asr;
     WHILE (L.next # F.trailer) & (pos >= org + L.len) DO
-      org := org + L.len; L := L.next; cury := cury - lsp
+      org := org + L.len; cury := cury - Step(L); L := L.next
     END;
     IF pos < org THEN pos := org
       ELSIF pos >= org + L.len THEN pos := org + L.len - 1
@@ -519,17 +564,18 @@ END MulDiv;
   PROCEDURE FlipSelection (F: Frame; VAR beg, end: Location);
     VAR L: Line; Y: INTEGER;
   BEGIN
-    L := beg.lin; Y := F.Y + beg.y - 2;
+    L := beg.lin; Y := F.Y + beg.y;  (* baselines; a line is selected from its descent to its ascent *)
     IF L = end.lin THEN
-      ReplConst(FullColor, F, F.X + beg.x, Y, end.x - beg.x, selH, invert)
+      ReplConst(FullColor, F, F.X + beg.x, Y - L.dsr, end.x - beg.x, L.asr + L.dsr, invert)
     ELSE
-      ReplConst(FullColor, F, F.X + beg.x, Y, F.left + L.wid - beg.x, selH, invert);
+      ReplConst(FullColor, F, F.X + beg.x, Y - L.dsr, F.left + L.wid - beg.x, L.asr + L.dsr, invert);
       LOOP
-        L := L.next; Y := Y - lsp;
+        IF L.next = F.trailer THEN EXIT END;
+        Y := Y - Step(L); L := L.next;
         IF L = end.lin THEN EXIT END;
-        ReplConst(FullColor, F, F.X + F.left, Y, L.wid, selH, invert)
+        ReplConst(FullColor, F, F.X + F.left, Y - L.dsr, L.wid, L.asr + L.dsr, invert)
       END;
-      ReplConst(FullColor, F, F.X + F.left, Y, end.x - F.left, selH, invert)
+      IF L = end.lin THEN ReplConst(FullColor, F, F.X + F.left, Y - L.dsr, end.x - F.left, L.asr + L.dsr, invert) END
     END
   END FlipSelection;
 
@@ -616,7 +662,7 @@ END MulDiv;
   BEGIN
         IF F.trailer.next # F.trailer THEN
         LocateLine(F, Y - F.Y, old);
-        ReplConst(FullColor, F, F.X + F.left, F.Y + old.y - dsr, old.lin.wid, 2, invert);
+        ReplConst(FullColor, F, F.X + F.left, F.Y + old.y - old.lin.dsr, old.lin.wid, 2, invert);
           keysum := {};
         REPEAT
           Input.Mouse(keys, X, Y);
@@ -624,12 +670,12 @@ END MulDiv;
             Oberon.DrawCursor(Oberon.Mouse, Oberon.Mouse.marker, X, Y);
           LocateLine(F, Y - F.Y, new);
           IF new.org # old.org THEN
-            ReplConst(FullColor, F, F.X + F.left, F.Y + old.y - dsr, old.lin.wid, 2, invert);
-            ReplConst(FullColor, F, F.X + F.left, F.Y + new.y - dsr, new.lin.wid, 2, invert);
+            ReplConst(FullColor, F, F.X + F.left, F.Y + old.y - old.lin.dsr, old.lin.wid, 2, invert);
+            ReplConst(FullColor, F, F.X + F.left, F.Y + new.y - new.lin.dsr, new.lin.wid, 2, invert);
             old := new
           END
         UNTIL keys = {};
-        ReplConst(FullColor, F, F.X + F.left, F.Y + new.y - dsr, new.lin.wid, 2, invert);
+        ReplConst(FullColor, F, F.X + F.left, F.Y + new.y - new.lin.dsr, new.lin.wid, 2, invert);
         org := new.org
         ELSE org := -1
         END
@@ -640,7 +686,7 @@ END MulDiv;
   BEGIN
     IF F.trailer.next # F.trailer THEN
     LocateString(F, X - F.X, Y - F.Y, old);
-    ReplConst(FullColor, F, F.X + old.x, F.Y + old.y - dsr, old.dx, 2, invert);
+    ReplConst(FullColor, F, F.X + old.x, F.Y + old.y - old.lin.dsr, old.dx, 2, invert);
       keysum := {};
       REPEAT
       Input.Mouse(keys, X, Y);
@@ -648,12 +694,12 @@ END MulDiv;
       Oberon.DrawCursor(Oberon.Mouse, Oberon.Mouse.marker, X, Y);
       LocateString(F, X - F.X, Y - F.Y, new);
       IF new.pos # old.pos THEN
-        ReplConst(FullColor, F, F.X + old.x, F.Y + old.y - dsr, old.dx, 2, invert);
-        ReplConst(FullColor, F, F.X + new.x, F.Y + new.y - dsr, new.dx, 2, invert);
+        ReplConst(FullColor, F, F.X + old.x, F.Y + old.y - old.lin.dsr, old.dx, 2, invert);
+        ReplConst(FullColor, F, F.X + new.x, F.Y + new.y - new.lin.dsr, new.dx, 2, invert);
         old := new
       END
     UNTIL keys = {};
-    ReplConst(FullColor, F, F.X + new.x, F.Y + new.y - dsr, new.dx, 2, invert);
+    ReplConst(FullColor, F, F.X + new.x, F.Y + new.y - new.lin.dsr, new.dx, 2, invert);
     pos := new.pos; hintPos := new.org
     ELSE pos := -1
     END
@@ -764,22 +810,37 @@ END MulDiv;
     END
   END MoveCaret;
 
+  (* baseline (relative to F.Y) of the line shown before L *)
+  PROCEDURE PrevBase (F: Frame; L: Line): INTEGER;
+    VAR P: Line; y, py: INTEGER;
+  BEGIN
+    P := F.trailer.next; y := F.H - F.top - P.asr; py := y;
+    WHILE (P # L) & (P # F.trailer) DO py := y; y := y - Step(P); P := P.next END;
+    RETURN py
+  END PrevBase;
+
   (* the caret one line up (dir = 1) or down (dir = -1), in the same column; scrolls at the edges *)
   PROCEDURE MoveLine (F: Frame; dir: INTEGER; shift: BOOLEAN);
-    VAR loc: Location; x, y: INTEGER; pos, org: LONGINT;
+    VAR loc: Location; x, y, n: INTEGER; pos, org: LONGINT;
   BEGIN
     IF goalF # F THEN goalF := F; goalX := F.carloc.x END;
-    x := goalX; y := F.carloc.y + dir * lsp;
-    IF (dir > 0) & (F.carloc.lin = F.trailer.next) THEN  (* first line shown *)
-      IF F.org = 0 THEN MoveCaret(F, 0, shift); RETURN END;
-      org := LineStart(F.text, F.org - 1); pos := F.carloc.pos;
-      RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
-      Show(F, org); LocatePos(F, pos, F.carloc); y := F.carloc.y + lsp
-    ELSIF (dir < 0) & (F.carloc.lin.next = F.trailer) THEN  (* last line shown *)
-      IF F.carloc.lin.eot THEN MoveCaret(F, F.text.len, shift); RETURN END;
-      pos := F.carloc.pos;
-      RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
-      Show(F, F.org + F.trailer.next.len); LocatePos(F, pos, F.carloc); y := F.carloc.y - lsp
+    x := goalX; pos := F.carloc.pos;
+    IF dir > 0 THEN
+      IF F.carloc.lin = F.trailer.next THEN  (* first line shown *)
+        IF F.org = 0 THEN MoveCaret(F, 0, shift); RETURN END;
+        org := LineStart(F.text, F.org - 1);
+        RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+        Show(F, org); LocatePos(F, pos, F.carloc)
+      END;
+      y := PrevBase(F, F.carloc.lin)
+    ELSE
+      n := 0;
+      WHILE (F.carloc.lin.next = F.trailer) & ~F.carloc.lin.eot & (n < 4) DO  (* last line shown *)
+        RemoveCaret(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
+        Show(F, F.org + F.trailer.next.len); LocatePos(F, pos, F.carloc); INC(n)
+      END;
+      IF F.carloc.lin.next = F.trailer THEN MoveCaret(F, F.text.len, shift); RETURN END;
+      y := F.carloc.y - Step(F.carloc.lin)
     END;
     LocateChar(F, x, y, loc);
     MoveCaret(F, loc.pos, shift)
@@ -922,6 +983,7 @@ END MulDiv;
     VAR L: Line;
   BEGIN NEW(L);
     L.len := 0; L.wid := 0; L.eot := FALSE; L.next := L;
+    L.asr := asr; L.dsr := dsr; L.h := Fonts.Default.height;
     F.handle := H; F.text := T; F.org := org; F.trailer := L;
     F.left := left; F.right := right; F.top := top; F.bot := bot;
     F.lsp := lsp; F.col := col; F.mark := 0; F.car := 0; F.sel := 0
@@ -976,10 +1038,12 @@ END MulDiv;
     RETURN len + 1
   END LineLen;
   
+  (** The text of F was changed: [beg, end) replaced by len characters.
+    polpo: lines have their own heights; a change inside one line that keeps its height
+    redraws that line, otherwise the lines from the changed one down are laid out again. *)
   PROCEDURE Update* (F: Frame; beg, end, len: LONGINT);
-    VAR R: Texts.Reader; L, LB, LR, LS: Line; done: BOOLEAN;
-      org, orgB, orgS, off, Llen: LONGINT;
-      botY, Y, YB, YL, YR, YS, wid, H: INTEGER;
+    VAR R: Texts.Reader; L, P, N: Line; loc: Location;
+      org, orgB, llen, off, pos: LONGINT; y, pY, top, wid, n: INTEGER;
   BEGIN
     IF end < F.org THEN F.org := F.org - (end - beg) + len;
     ELSE
@@ -987,91 +1051,32 @@ END MulDiv;
         F.trailer.next.len := F.trailer.next.len + (F.org - beg);
         F.org := beg
       END;
-      botY := F.Y + F.bot + dsr;
-      org := F.org; Y := F.Y + F.H - F.top - asr; L := F.trailer.next; 
+      org := F.org; P := F.trailer; pY := 0; L := F.trailer.next; y := F.Y + F.H - F.top - L.asr;
       WHILE (L # F.trailer) & (org + L.len <= beg) DO
-        org := org + L.len; Y := Y - lsp; L := L.next
+        org := org + L.len; P := L; pY := y; y := y - Step(L); L := L.next
       END;
-      IF L # F.trailer THEN done := FALSE;
+      IF L # F.trailer THEN
         RemoveMarks(F); Oberon.RemoveMarks(F.X, F.Y, F.W, F.H);
-        orgB := org; YB := Y; LB := L;
-        WHILE (L # F.trailer) & (org + L.len <= end) DO
-          org := org + L.len; Y := Y - lsp; L := L.next
-        END;
-        IF L # F.trailer THEN
-          org := org + L.len; Y := Y - lsp; L := L.next;
-          IF L # F.trailer THEN
-            YR := Y; LR := L; org := orgB; Y := YB;
-            Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
-            Llen := LineLen(R);
-            WHILE (org + Llen <= beg + len) & (botY + lsp <= Y) DO
-              org := org + Llen; Y := Y - lsp; Llen := LineLen(R)
-            END;
-            org := org + Llen; Y := Y - lsp;
-            IF botY <= Y THEN (* update with reusing lines *)
-              YL := Y; L := LR;
-              WHILE (L.next # F.trailer) & (botY + lsp <= Y) DO
-                org := org + L.len; Y := Y - lsp; L := L.next
-              END;
-              orgS := org; YS := Y; LS := L;
-              Display.CopyBlock (
-                F.X + F.left, YS - dsr + (YR - YL), F.W - F.left, YL + lsp - YS, F.X + F.left, YS - dsr, replace);
-              org := orgB; Y := YB; L := LB;
-              Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
-              off := beg - org; wid := Width(R, off);
-              ReplConst (F.col, F, F.X + F.left + wid, Y - dsr, L.wid - wid, lsp, 0);
-              DisplayLine(F, L, R, F.X + F.left + wid, Y, off);
-              WHILE org + L.len <= beg + len DO
-                org := org + L.len; Y := Y - lsp; NEW(L.next); L := L.next;
-                Display.ReplConst(F.col, F.X + F.left, Y - dsr, F.W - F.left, lsp, replace);
-                DisplayLine(F, L, R, F.X + F.left, Y, 0)
-              END;
-              L.next := LR;
-              org := orgS; Y := YS; L := LS; org := org + L.len; Y := Y - lsp;
-              Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
-              WHILE ~L.eot & (botY <= Y) DO
-                NEW(L.next); L := L.next;
-                Display.ReplConst(F.col, F.X + F.left, Y - dsr, F.W - F.left, lsp, replace);
-                DisplayLine(F, L, R, F.X + F.left, Y, 0);
-                org := org + L.len; Y := Y - lsp
-              END;
-              L.next := F.trailer;
-              IF YR < YL THEN H := Min(YL- YR, Y + lsp - dsr - F.Y);
-                Display.ReplConst(F.col, F.X + F.left, Y + lsp - dsr - H, F.W - F.left, H, replace)
-              END;
-              done := TRUE
-            END
-          END
-        END;
-        IF ~done THEN (* update without reusing lines *)
-          YR := Y; org := orgB; Y := YB; L := LB;
-          Texts.OpenReader(R, F.text, org); Texts.Read(R, ch);
-          off := beg - org; wid := Width(R, off);
-          ReplConst (F.col, F, F.X + F.left + wid, Y - dsr, L.wid - wid, lsp, 0);
-          DisplayLine(F, L, R, F.X + F.left + wid, Y, off);
-          WHILE ~L.eot & (botY + lsp <= Y) DO
-            org := org + L.len; Y := Y - lsp; NEW(L.next); L := L.next;
-            Display.ReplConst(F.col, F.X + F.left, Y - dsr, F.W - F.left, lsp, replace);
-            DisplayLine(F, L, R, F.X + F.left, Y, 0)
-          END;
-          org := org + L.len; Y := Y - lsp;
-          IF (Y < botY) & (org <= beg + len) & (beg + len < org + 500) THEN (*autoscroll*)
-            REPEAT
-              Display.CopyBlock
-              (F.X + F.left, Y + lsp - dsr, F.W - F.left, F.Y + F.H - F.top - asr - Y - lsp,
-                  F.X + F.left, Y + lsp - dsr + lsp,
-              replace);
-              F.org := F.org + F.trailer.next.len;
-              L.next := F.trailer.next; F.trailer.next := F.trailer.next.next;
-              L := L.next;
-              Display.ReplConst(F.col, F.X + F.left, Y + lsp - dsr, F.W - F.left, lsp, replace);
-              DisplayLine(F, L, R, F.X + F.left, Y + lsp, 0);
-              org := org + L.len
-            UNTIL org > beg + len
-          END;
-          L.next := F.trailer;
-          IF YR < Y THEN
-            Display.ReplConst (F.col, F.X + F.left, YR + lsp - dsr, F.W - F.left, Y - YR, replace)
+        orgB := org;
+        Texts.OpenReader(R, F.text, orgB); Texts.Read(R, ch); llen := LineLen(R);
+        NEW(N); Texts.OpenReader(R, F.text, orgB); Texts.Read(R, ch); MeasureLine(R, N);
+        IF (end < orgB + L.len) & (llen = L.len - (end - beg) + len)
+            & (N.asr = L.asr) & (N.dsr = L.dsr) & (N.h = L.h) THEN
+          (* inside the line, same height: redraw it from beg on *)
+          off := beg - orgB; wid := Width(R, off);
+          ReplConst(F.col, F, F.X + F.left + wid, y - L.dsr, L.wid - wid, L.asr + L.dsr, replace);
+          DisplayLine(F, L, R, F.X + F.left + wid, y, off)
+        ELSE
+          (* lay out the lines from L down again *)
+          IF P = F.trailer THEN top := F.Y + F.H - F.top ELSE top := pY - P.dsr END;
+          IF top > F.Y THEN Display.ReplConst(F.col, F.X + F.left, F.Y, F.W - F.left, top - F.Y, replace) END;
+          Texts.OpenReader(R, F.text, orgB); Texts.Read(R, ch);
+          P.next := F.trailer; Fill(F, P, pY, R);
+          (* autoscroll: keep the end of the change visible when it went below *)
+          pos := beg + len; n := 0;
+          LocatePos(F, pos, loc);
+          WHILE (loc.pos # pos) & (pos > F.org) & (F.trailer.next # F.trailer) & (F.trailer.next.next # F.trailer) & (n < 50) DO
+            ShowOrg(F, F.org + F.trailer.next.len); LocatePos(F, pos, loc); INC(n)
           END
         END
       END
@@ -1270,7 +1275,8 @@ END MulDiv;
   bot := Fonts.Default.height DIV 2;
   asr := Fonts.Default.maxY;
   dsr := -Fonts.Default.minY;
-  lsp := SHORT(Fonts.Default.height * LineSpacing() DIV 100);  (* polpo: leading between lines *)
+  spacing := LineSpacing();
+  lsp := SHORT(Fonts.Default.height * spacing DIV 100);  (* polpo: leading between lines of the default font *)
   selH := Fonts.Default.height;
   markW := Fonts.Default.height DIV 3 * 2;
   eolW := Fonts.Default.height DIV 2;
