@@ -39,10 +39,9 @@ see www.kernel.org/doc/Documentation/input/imput.txt and /usr/include/linux/inpu
 Module Input is responsible for event timing, mouse and keyboard input.
 *)
 
-IMPORT  Linux0, Kernel, Display, Utf8, SYSTEM;
+IMPORT  Linux0, Kernel, FileDir, Display, Utf8, SYSTEM;
 
 CONST
-  ME="/dev/input/eventx";
 
   STDERR=2;
   KDSETMODE=4B3AH;
@@ -679,31 +678,35 @@ BEGIN
   switching:= FALSE;
 END SwitchConHandler;
 
+(* Open the first mouse device found by FileDir.Enumerate. *)
+PROCEDURE OpenMouse(name: ARRAY OF CHAR; time, date, size: LONGINT; VAR flags: SET);
+BEGIN
+  IF mfd<=0 THEN
+    mfd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(name), Linux0.ORDonly, 0);
+    IF mfd>0 THEN Kernel.WriteString( "Input: using "); Kernel.WriteString( name); Kernel.WriteLn END
+  END
+END OpenMouse;
+
+(* Framebuffer mouse, after OLR 2017-04-16: OMEVENT if set, else /dev/input/mice (all mice
+   and touchpads), else the first /dev/input/by-id/*-event-mouse. *)
 PROCEDURE InitMouseFB;
-CONST cmd=801F4520H;
-VAR res, i, l: LONGINT; s: ARRAY 20 OF CHAR; c: CHAR;
+VAR s: ARRAY 64 OF CHAR;
 BEGIN
   Kernel.GetConfig("OMEVENT", s);
   IF s="" THEN
-    s:=ME;
-    c:="0";
-    REPEAT
-      IF ORD(c)>ORD("9") THEN WriteErr("Can't open /dev/input/eventX"); Kernel.Shutdown( 1)END;
-      s[16]:= c;
-      mfd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(s), Linux0.ORDonly, 0);
-      IF mfd<=0 THEN Kernel.WriteString( "Can't open "); Kernel.WriteString(s); Kernel.WriteHex( -mfd, 9); Kernel.WriteLn END;
-      res:=Linux0.IOCtl0(mfd, cmd, SYSTEM.ADR(l));
-      mfd:=Linux0.Close0(mfd);
-      c:=CHR( ORD(c)+1);
-    UNTIL (l DIV 2 MOD 4 =3);
+    s:="/dev/input/mice";
+    mfd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(s), Linux0.ORDonly, 0);
+    iemouse:=FALSE;
+    IF mfd<=0 THEN
+      mfd:=-1; iemouse:=TRUE;
+      s:="/dev/input/by-id/*-event-mouse";
+      FileDir.Enumerate(s, {}, OpenMouse)
+    END
+  ELSE
+    mfd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(s), Linux0.ORDonly, 0);
+    iemouse:=s[11]#"m";  (* /dev/input/mouseX|mice *)
   END;
-  mfd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(s), Linux0.ORDonly, 0);
   IF mfd<=0 THEN Kernel.WriteString( "Can't open "); Kernel.WriteString(s); Kernel.WriteLn; Kernel.Shutdown( 1) END;
-  iemouse:=s[11]#"m";  (* /dev/input/mouseX|mice *)
-  IF iemouse THEN
-    res:=Linux0.IOCtl0(mfd, cmd, SYSTEM.ADR(l));
-    IF (l DIV 2 MOD 4 #3) THEN Kernel.WriteString( s); Kernel.WriteString(" not a mouse device."); Kernel.WriteLn; Kernel.Shutdown( 1) END;
-  END;
 END InitMouseFB;
 
 PROCEDURE TTYtcSetAttr( VAR io: TermIOs);

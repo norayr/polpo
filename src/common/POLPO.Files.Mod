@@ -370,10 +370,11 @@ VAR f: File; res: LONGINT;
 BEGIN
   f:=r.file;
   res:=r.apos+n-f.len;
-  IF  res>0 THEN    (* todo: test! *)
+  IF  res>0 THEN
     r.eof:= TRUE;
     r.res:= res;
-    DEC(n, res);
+    (* OLR 2017-02-25: bytes beyond the end of the file read as 0X *)
+    REPEAT DEC(n); x[n]:=0X; DEC(res) UNTIL res=0;
   ELSE
     r.eof:= FALSE;
     r.res:= 0;
@@ -437,11 +438,11 @@ END ReadString;
 
 (** Reads a number in compressed variable length notation using the minimum amount of bytes. *)
 PROCEDURE ReadNum*(VAR r: Rider; VAR x: LONGINT);
-VAR ch: CHAR; n: INTEGER; y: LONGINT;
+VAR ch: CHAR; n, y: LONGINT;
 BEGIN
   n := 0; y := 0; Read(r, ch);
-  WHILE ch >= 80X DO INC(y, SYSTEM.LSH(LONG(ch) - 128, n)); INC(n, 7); Read(r, ch) END;
-  x := ASH(SYSTEM.LSH(LONG(ch), Linux0.RegSize-7), n-Linux0.RegSize + 7) + y
+  WHILE ch >= 80X DO INC(y, SYSTEM.LSH(LONG(ORD(ch)) - 128, n)); INC(n, 7); Read(r, ch) END;
+  x := ASH(SYSTEM.LSH(LONG(ORD(ch)), Linux0.RegSize-7), n-Linux0.RegSize + 7) + y
 END ReadNum;
 
 (** Writes the buffer x containing n bytes into a file at the Rider position. *)

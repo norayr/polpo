@@ -264,7 +264,7 @@ VAR
   scn*: Screen;
   r1data: SetupRes1;
 
-  ShmReqCode, BigReqCode, shmid: LONGINT;
+  ShmReqCode, BigReqCode, BigReqSize, shmid: LONGINT;  (* BigReqSize: max. request length in 4-byte units *)
 
   x11Keymap: POINTER TO ARRAY  OF ARRAY OF LONGINT;
 
@@ -338,7 +338,9 @@ PROCEDURE PutImageFB( x, y, w, h: LONGINT);
 END PutImageFB;
 
 PROCEDURE PutImageX11( x, y, w, h: LONGINT);
-VAR i, j, res, wl, adr: LONGINT;
+(* polpo, after OLR 2017: send tall images in bands that fit the server's maximum request
+   length, and each band in writev calls of at most 256 iovecs (Linux allows 1024) *)
+VAR i, j, res, wl, adr, rows, band, maxv: LONGINT;
   b: ARRAY 10 OF LONGINT;
 BEGIN
   x:=x DIV Zoom; y:=y DIV Zoom; w:=w DIV Zoom; h:=h DIV Zoom;
@@ -346,24 +348,29 @@ BEGIN
   IF (w>0) & (h>0) THEN
     y:=Height-h-y;
     wl:=(w*bytes+3) DIV 4 *4;
-    b[ 0]:= 72+2*100H;    (* BIG-REQUESTS *)
-    b[ 1]:= h*wl DIV 4+7;
-    b[ 2]:= wid;
-    b[ 3]:= gcid;
-    b[ 4]:= w+h*10000H;
-    b[ 5]:= x+y*10000H;
-    b[ 6]:= 0+ORD( scn.rdepth)*100H;
-    xrv[0]:= SYSTEM.ADR(b); xrv[1]:=28;
-    j:=2;
+    rows:=(BigReqSize-7)*4 DIV wl; IF rows<1 THEN rows:=1 END;
+    maxv:=LEN(xrv^) DIV 2; IF maxv>256 THEN maxv:=256 END;
     adr:=fbadr+ (x+y*Width)*bytes;
-    i:=0;
-    REPEAT
-(*      xrv[j]:= SYSTEM.ADR(fbuf[ (x+i*Width)*bytes]); INC(j);*)
-      xrv[j]:= adr; INC(adr, Width*bytes);
-      xrv[j+1]:= wl; INC(j, 2);
-      INC(i);
-    UNTIL i>=h;
-    res:=Linux0.Writev0( xfd, SYSTEM.ADR(xrv[0]), h+1);
+    WHILE h>0 DO
+      band:=h; IF band>rows THEN band:=rows END;
+      b[ 0]:= 72+2*100H;    (* BIG-REQUESTS *)
+      b[ 1]:= band*wl DIV 4+7;
+      b[ 2]:= wid;
+      b[ 3]:= gcid;
+      b[ 4]:= w+band*10000H;
+      b[ 5]:= x+y*10000H;
+      b[ 6]:= 0+ORD( scn.rdepth)*100H;
+      xrv[0]:= SYSTEM.ADR(b); xrv[1]:=28;
+      j:=2; i:=0;
+      REPEAT
+        xrv[j]:= adr; INC(adr, Width*bytes);
+        xrv[j+1]:= wl; INC(j, 2);
+        INC(i);
+        IF j=2*maxv THEN res:=Linux0.Writev0( xfd, SYSTEM.ADR(xrv[0]), maxv); j:=0 END;
+      UNTIL i>=band;
+      IF j>0 THEN res:=Linux0.Writev0( xfd, SYSTEM.ADR(xrv[0]), j DIV 2) END;
+      INC(y, band); DEC(h, band)
+    END
   END;
 END PutImageX11;
 
@@ -1293,10 +1300,13 @@ BEGIN
   gcid:=wid+1;  shmseg:=gcid+1;
 
   QueryExtensionX11("BIG-REQUESTS", BigReqCode);
+  BigReqSize:=65535;
   IF BigReqCode#0 THEN
     b[ 0]:= BigReqCode+0*100H+1*10000H;
     res:=Linux0.Write0( xfd, SYSTEM.ADR(b), 4);
     res:=Linux0.Read0( xfd, SYSTEM.ADR(b), 32);
+    BigReqSize:=b[2];  (* maximum request length, after OLR 2017 *)
+    IF trace THEN WriteSH("BIG-REQUESTS size= ", BigReqSize) END;
   END;
 
 (* needed create win for cursor pixmap *)
@@ -1435,7 +1445,7 @@ BEGIN
     PutImage:=PutImageX11SHM;
   ELSE
     NEW( xrv, (Height+1)*2);
-    NEW( fbuf, LONG(Height)* LONG(Width)*bytes);
+    NEW( fbuf, LONG(Height)* LONG(Width)*bytes*Zoom);  (* rows are linelength*Zoom apart, as with MIT-SHM *)
     fbadr:=SYSTEM.ADR( fbuf[0]);
     PutImage:=PutImageX11;
   END;
@@ -1638,75 +1648,68 @@ BEGIN
 END CloseX11;
 
 PROCEDURE GetAuth(VAR s: ARRAY OF CHAR): BOOLEAN;
-VAR t, t2: ARRAY 256 OF CHAR; disp1, disp2, fd, adr, i2, j: LONGINT; c, c2 : CHAR; n0, n1: SHORTINT;
+(* polpo: find the MIT-MAGIC-COOKIE-1 of our display in the X authority file and put it
+   into the connection setup s (name at 12, data at 32). The file is a sequence of entries
+   family(2) address(2+n) number(2+n) name(2+n) data(2+n), all lengths big-endian;
+   every field is bounds-checked, so an unusual file cannot crash the startup. *)
+CONST BufLen = 16384; NameLen = 18;
+VAR t, t2: ARRAY 256 OF CHAR; buf: ARRAY BufLen OF CHAR;
+  disp1, disp2, fd, n, pos, len, numpos, numlen, namepos, namelen, datapos, datalen, i, res: LONGINT;
+  ok: BOOLEAN;
 BEGIN
   Kernel.GetConfig("XAUTHORITY", t);
   IF t="" THEN  (* use default *)
     Kernel.GetConfig("HOME", t);
-    i2:=0;
-    WHILE t[i2]#0X DO INC(i2) END;
-    j:=0;
-    t2:="/.Xauthority";
-    WHILE t2[j]#0X DO t[i2]:=t2[j]; INC(i2); INC(j) END;
+    i:=0; WHILE t[i]#0X DO INC(i) END;
+    n:=0; t2:="/.Xauthority";
+    WHILE (t2[n]#0X) & (i<LEN(t)-1) DO t[i]:=t2[n]; INC(i); INC(n) END;
+    t[i]:=0X
   END;
   Kernel.GetConfig("DISPLAY", t2);
-  i2:=0;
-  WHILE (t2[i2]#0X) & (t2[i2]#":") DO INC(i2) END;  (* skip adr *)
-  disp1:=0; INC(i2);
-  WHILE (t2[i2]>="0") & (t2[i2]<="9") DO disp1:=disp1*10+ORD(t2[i2])-ORD("0"); INC(i2) END;
+  i:=0; WHILE (t2[i]#0X) & (t2[i]#":") DO INC(i) END;  (* skip host *)
+  disp1:=0; IF t2[i]=":" THEN INC(i) END;
+  WHILE (t2[i]>="0") & (t2[i]<="9") DO disp1:=disp1*10+ORD(t2[i])-ORD("0"); INC(i) END;
   fd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(t), Linux0.ORDonly, 0);
   IF fd<=0 THEN Kernel.WriteString("Can't open Xauth file "); Kernel.WriteString(t); Kernel.WriteLn; RETURN FALSE END;
-  IF trace THEN Kernel.WriteString("opening Xauth file: "); Kernel.WriteString(t); Kernel.WriteString(" disp1= "); Kernel.WriteInt( disp1, 1); Kernel.WriteLn END;
-  adr:=Linux0.Mmap20( 0, 4096, 1 (* PROT_READ*), Linux0.MAPSHARED, fd, 0);
-  IF adr MOD 1000H =0 THEN
-    n0:=10;
-    WHILE n0>0 DO
-      INC(adr, 2);
-      DEC(n0);
-      REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-      INC(adr, LONG(ORD(c)));        (* skip name *)
-      REPEAT INC(adr); SYSTEM.GET(adr, n1) UNTIL n1#0;
-      disp2:=0;
-      WHILE n1>0 DO INC(adr); SYSTEM.GET(adr, c); disp2:=disp2*10+ORD(c)-ORD("0"); DEC(n1) END;
-      IF trace THEN  Kernel.WriteString("disp2= "); Kernel.WriteInt( disp2, 3); Kernel.WriteLn END;
-      REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-      IF disp1=disp2 THEN
-        IF c=12X THEN  (* MIT-MAGIC-COOKIE-1 *)  
-          s[ 6]:= c;
-          i2:=ORD(c);
-          j:=12;
-          REPEAT
-            INC(adr);
-            SYSTEM.GET(adr, c2);
-            s[j]:= c2;
-            INC(j); DEC(i2);
-          UNTIL i2=0;
-          REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-          s[ 8]:= c;
-          i2:=ORD(c);
-          j:= 32;
-          REPEAT
-            INC(adr);
-            SYSTEM.GET(adr, c2);
-            s[j]:= c2;
-            INC(j); DEC(i2);
-          UNTIL i2=0;
-          adr:=Linux0.Munmap0(ASH( ASH(adr, -12),12), 4096);
-          fd:=Linux0.Close0(fd);
-          RETURN TRUE;
-        END;
+  n:=0;
+  REPEAT res:=Linux0.Read0( fd, SYSTEM.ADR(buf[n]), BufLen-n); IF res>0 THEN INC(n, res) END
+  UNTIL (res<=0) OR (n=BufLen);
+  res:=Linux0.Close0( fd);
+  IF trace THEN Kernel.WriteString("Xauth file: "); Kernel.WriteString(t); Kernel.WriteInt(n, 7); Kernel.WriteInt(disp1, 4); Kernel.WriteLn END;
+  pos:=0;
+  LOOP
+    IF pos+2>n THEN EXIT END;
+    INC(pos, 2);  (* family *)
+    ok:=TRUE; i:=0;
+    WHILE ok & (i<4) DO  (* address, number, name, data *)
+      IF pos+2>n THEN ok:=FALSE
       ELSE
-        INC(adr, LONG(ORD(c)));        (* skip protocol *)
-        REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-        INC(adr, LONG(ORD(c)));        (* skip cookie *)
-      END;
-    END; (*WHILE*)
-    adr:=Linux0.Munmap0( adr, 4096);
-  ELSE
-    Kernel.WriteString("Display.GetAuth mmap failed "); Kernel.WriteHex( -adr, 9); Kernel.WriteLn;
+        len:=ORD(buf[pos])*100H+ORD(buf[pos+1]); INC(pos, 2);
+        IF pos+len>n THEN ok:=FALSE
+        ELSE
+          IF i=1 THEN numpos:=pos; numlen:=len
+          ELSIF i=2 THEN namepos:=pos; namelen:=len
+          ELSIF i=3 THEN datapos:=pos; datalen:=len
+          END;
+          INC(pos, len); INC(i)
+        END
+      END
+    END;
+    IF ~ok THEN EXIT END;
+    disp2:=0; i:=0;
+    WHILE (i<numlen) & (buf[numpos+i]>="0") & (buf[numpos+i]<="9") DO disp2:=disp2*10+ORD(buf[numpos+i])-ORD("0"); INC(i) END;
+    IF (numlen>0) & (i=numlen) & (disp2=disp1) & (namelen=NameLen) & (datalen=16) THEN
+      t2:="MIT-MAGIC-COOKIE-1"; i:=0;
+      WHILE (i<NameLen) & (buf[namepos+i]=t2[i]) DO INC(i) END;
+      IF i=NameLen THEN
+        s[6]:=CHR(namelen); s[8]:=CHR(datalen);
+        FOR i:=0 TO namelen-1 DO s[12+i]:=buf[namepos+i] END;
+        FOR i:=0 TO datalen-1 DO s[32+i]:=buf[datapos+i] END;
+        RETURN TRUE
+      END
+    END
   END;
-  fd:=Linux0.Close0(fd);
-  RETURN FALSE;
+  RETURN FALSE
 END GetAuth;   
 
 PROCEDURE InitX11*(): LONGINT;

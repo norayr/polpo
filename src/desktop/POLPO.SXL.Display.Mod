@@ -1806,75 +1806,68 @@ BEGIN
 END CloseX11;
 
 PROCEDURE GetAuth(VAR s: ARRAY OF CHAR): BOOLEAN;
-VAR t, t2: ARRAY 256 OF CHAR; disp1, disp2, fd, adr, i2, j: LONGINT; c, c2 : CHAR; n0, n1: SHORTINT;
+(* polpo: find the MIT-MAGIC-COOKIE-1 of our display in the X authority file and put it
+   into the connection setup s (name at 12, data at 32). The file is a sequence of entries
+   family(2) address(2+n) number(2+n) name(2+n) data(2+n), all lengths big-endian;
+   every field is bounds-checked, so an unusual file cannot crash the startup. *)
+CONST BufLen = 16384; NameLen = 18;
+VAR t, t2: ARRAY 256 OF CHAR; buf: ARRAY BufLen OF CHAR;
+  disp1, disp2, fd, n, pos, len, numpos, numlen, namepos, namelen, datapos, datalen, i, res: LONGINT;
+  ok: BOOLEAN;
 BEGIN
   Kernel.GetConfig("XAUTHORITY", t);
   IF t="" THEN  (* use default *)
     Kernel.GetConfig("HOME", t);
-    i2:=0;
-    WHILE t[i2]#0X DO INC(i2) END;
-    j:=0;
-    t2:="/.Xauthority";
-    WHILE t2[j]#0X DO t[i2]:=t2[j]; INC(i2); INC(j) END;
+    i:=0; WHILE t[i]#0X DO INC(i) END;
+    n:=0; t2:="/.Xauthority";
+    WHILE (t2[n]#0X) & (i<LEN(t)-1) DO t[i]:=t2[n]; INC(i); INC(n) END;
+    t[i]:=0X
   END;
   Kernel.GetConfig("DISPLAY", t2);
-  i2:=0;
-  WHILE (t2[i2]#0X) & (t2[i2]#":") DO INC(i2) END;  (* skip adr *)
-  disp1:=0; INC(i2);
-  WHILE (t2[i2]>="0") & (t2[i2]<="9") DO disp1:=disp1*10+ORD(t2[i2])-ORD("0"); INC(i2) END;
+  i:=0; WHILE (t2[i]#0X) & (t2[i]#":") DO INC(i) END;  (* skip host *)
+  disp1:=0; IF t2[i]=":" THEN INC(i) END;
+  WHILE (t2[i]>="0") & (t2[i]<="9") DO disp1:=disp1*10+ORD(t2[i])-ORD("0"); INC(i) END;
   fd:=Linux0.Openat0( Linux0.ATFDCWD, SYSTEM.ADR(t), Linux0.ORDonly, 0);
   IF fd<=0 THEN Kernel.WriteString("Can't open Xauth file "); Kernel.WriteString(t); Kernel.WriteLn; RETURN FALSE END;
-  IF trace THEN Kernel.WriteString("opening Xauth file: "); Kernel.WriteString(t); Kernel.WriteString(" disp1= "); Kernel.WriteInt( disp1, 1); Kernel.WriteLn END;
-  adr:=Linux0.Mmap20( 0, 4096, 1 (* PROT_READ*), Linux0.MAPSHARED, fd, 0);
-  IF adr MOD 1000H =0 THEN
-    n0:=10;
-    WHILE n0>0 DO
-      INC(adr, 2);
-      DEC(n0);
-      REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-      INC(adr, LONG(ORD(c)));        (* skip name *)
-      REPEAT INC(adr); SYSTEM.GET(adr, n1) UNTIL n1#0;
-      disp2:=0;
-      WHILE n1>0 DO INC(adr); SYSTEM.GET(adr, c); disp2:=disp2*10+ORD(c)-ORD("0"); DEC(n1) END;
-      IF trace THEN  Kernel.WriteString("disp2= "); Kernel.WriteInt( disp2, 3); Kernel.WriteLn END;
-      REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-      IF disp1=disp2 THEN
-        IF c=12X THEN  (* MIT-MAGIC-COOKIE-1 *)
-          s[ 6]:= c;
-          i2:=ORD(c);
-          j:=12;
-          REPEAT
-            INC(adr);
-            SYSTEM.GET(adr, c2);
-            s[j]:= c2;
-            INC(j); DEC(i2);
-          UNTIL i2=0;
-          REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-          s[ 8]:= c;
-          i2:=ORD(c);
-          j:= 32;
-          REPEAT
-            INC(adr);
-            SYSTEM.GET(adr, c2);
-            s[j]:= c2;
-            INC(j); DEC(i2);
-          UNTIL i2=0;
-          adr:=Linux0.Munmap0(ASH( ASH(adr, -12),12), 4096);
-          fd:=Linux0.Close0(fd);
-          RETURN TRUE;
-        END;
+  n:=0;
+  REPEAT res:=Linux0.Read0( fd, SYSTEM.ADR(buf[n]), BufLen-n); IF res>0 THEN INC(n, res) END
+  UNTIL (res<=0) OR (n=BufLen);
+  res:=Linux0.Close0( fd);
+  IF trace THEN Kernel.WriteString("Xauth file: "); Kernel.WriteString(t); Kernel.WriteInt(n, 7); Kernel.WriteInt(disp1, 4); Kernel.WriteLn END;
+  pos:=0;
+  LOOP
+    IF pos+2>n THEN EXIT END;
+    INC(pos, 2);  (* family *)
+    ok:=TRUE; i:=0;
+    WHILE ok & (i<4) DO  (* address, number, name, data *)
+      IF pos+2>n THEN ok:=FALSE
       ELSE
-        INC(adr, LONG(ORD(c)));        (* skip protocol *)
-        REPEAT INC(adr); SYSTEM.GET(adr, c) UNTIL c#0X;
-        INC(adr, LONG(ORD(c)));        (* skip cookie *)
-      END;
-    END; (*WHILE*)
-    adr:=Linux0.Munmap0( adr, 4096);
-  ELSE
-    Kernel.WriteString("Display.GetAuth mmap failed "); Kernel.WriteHex( -adr, 9); Kernel.WriteLn;
+        len:=ORD(buf[pos])*100H+ORD(buf[pos+1]); INC(pos, 2);
+        IF pos+len>n THEN ok:=FALSE
+        ELSE
+          IF i=1 THEN numpos:=pos; numlen:=len
+          ELSIF i=2 THEN namepos:=pos; namelen:=len
+          ELSIF i=3 THEN datapos:=pos; datalen:=len
+          END;
+          INC(pos, len); INC(i)
+        END
+      END
+    END;
+    IF ~ok THEN EXIT END;
+    disp2:=0; i:=0;
+    WHILE (i<numlen) & (buf[numpos+i]>="0") & (buf[numpos+i]<="9") DO disp2:=disp2*10+ORD(buf[numpos+i])-ORD("0"); INC(i) END;
+    IF (numlen>0) & (i=numlen) & (disp2=disp1) & (namelen=NameLen) & (datalen=16) THEN
+      t2:="MIT-MAGIC-COOKIE-1"; i:=0;
+      WHILE (i<NameLen) & (buf[namepos+i]=t2[i]) DO INC(i) END;
+      IF i=NameLen THEN
+        s[6]:=CHR(namelen); s[8]:=CHR(datalen);
+        FOR i:=0 TO namelen-1 DO s[12+i]:=buf[namepos+i] END;
+        FOR i:=0 TO datalen-1 DO s[32+i]:=buf[datapos+i] END;
+        RETURN TRUE
+      END
+    END
   END;
-  fd:=Linux0.Close0(fd);
-  RETURN FALSE;
+  RETURN FALSE
 END GetAuth;
 
 PROCEDURE InitX11*(): LONGINT;
