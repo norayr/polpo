@@ -227,6 +227,133 @@ BEGIN
   IF rich & (curBold OR curItalic OR curUnder OR (curCol # 15)) THEN Attr(0) END
 END ShowFile;
 
+(* ----- editing texts from the console ----- *)
+
+(* position of the first occurrence of pat at or after pos in T, or -1 *)
+PROCEDURE Find(T: Text; pos: LONGINT; VAR pat: ARRAY OF CHAR): LONGINT;
+VAR R, R1: Reader; ch, ch1: CHAR; i: INTEGER;
+BEGIN
+  IF pat[0] = 0X THEN RETURN -1 END;
+  OpenReader(R, T, pos); Read(R, ch);
+  WHILE ~R.eot DO
+    IF ch = pat[0] THEN
+      OpenReader(R1, T, pos + 1); i := 1; Read(R1, ch1);
+      WHILE (pat[i] # 0X) & ~R1.eot & (ch1 = pat[i]) DO INC(i); Read(R1, ch1) END;
+      IF pat[i] = 0X THEN RETURN pos END
+    END;
+    INC(pos); Read(R, ch)
+  END;
+  RETURN -1
+END Find;
+
+(* does T contain only characters, no objects that the console cannot store *)
+PROCEDURE OnlyCharacters(T: Text): BOOLEAN;
+VAR R: Reader; ch: CHAR;
+BEGIN
+  OpenReader(R, T, 0); Read(R, ch);
+  WHILE ~R.eot & IsCharacterLibrary(R.lib) DO Read(R, ch) END;
+  RETURN R.eot
+END OnlyCharacters;
+
+(* open the text name for editing; plain: the file is ASCII, not an Oberon text *)
+PROCEDURE OpenEdit(VAR name: ARRAY OF CHAR; VAR T: Text; VAR plain: BOOLEAN): BOOLEAN;
+VAR f: Files.File; R: Files.Rider; ch: CHAR;
+BEGIN
+  f := Files.Old(name);
+  IF f = NIL THEN out.String(name); out.String(" not found"); out.Ln; RETURN FALSE END;
+  Files.Set(R, f, 0); Files.Read(R, ch); Files.ReleaseRead(f);
+  plain := (Files.Length(f) = 0) OR (ch # 0F0X) & (ch # 0F7X) & (ch # 01X);
+  NEW(T); Open(T, name);
+  IF ~OnlyCharacters(T) THEN
+    out.String(name); out.String(" contains objects, edit it in Oberon"); out.Ln; RETURN FALSE
+  END;
+  RETURN TRUE
+END OpenEdit;
+
+(* store T as name, the old file as name.Bak; a plain text stays plain *)
+PROCEDURE StoreEdit(VAR name: ARRAY OF CHAR; T: Text; plain: BOOLEAN);
+VAR f: Files.File; W: Files.Rider; R: Reader; ch: CHAR; bak: ARRAY 256 OF CHAR; i, res: INTEGER;
+BEGIN
+  f := Files.New(name);
+  IF f = NIL THEN out.String(name); out.String(" cannot be written"); out.Ln; RETURN END;
+  Files.Set(W, f, 0);
+  IF plain THEN
+    OpenReader(R, T, 0); Read(R, ch);
+    WHILE ~R.eot DO
+      IF ch = 0DX THEN ch := 0AX END;  (* texts hold line ends as CR *)
+      Files.Write(W, ch); Read(R, ch)
+    END
+  ELSE Store(W, T)
+  END;
+  i := 0; WHILE (name[i] # 0X) & (i < LEN(bak) - 5) DO bak[i] := name[i]; INC(i) END;
+  bak[i] := "."; bak[i+1] := "B"; bak[i+2] := "a"; bak[i+3] := "k"; bak[i+4] := 0X;
+  Files.Rename(name, bak, res);
+  Files.Register(f)
+END StoreEdit;
+
+(** texts.Replace file "old" "new" ~ -- replace every occurrence of old by new in the text
+  file, "" as new deletes. The new text gets the font and colour of the old. The file is
+  stored, its old version kept as .Bak; a plain ASCII file stays plain. *)
+PROCEDURE Replace*;
+VAR S: Scanner; name, old, new: ARRAY 64 OF CHAR; T: Text; R: Reader; W: Writer;
+  ch: CHAR; plain: BOOLEAN; pos, oldlen, newlen, n: LONGINT;
+BEGIN
+  OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Scan(S);
+  IF ~(S.class IN {Name, String}) THEN out.String("usage: texts.Replace file old new ~"); out.Ln; RETURN END;
+  COPY(S.s, name); Scan(S);
+  IF ~(S.class IN {Name, String}) THEN
+    out.String("texts.Replace: old text missing, quote texts with spaces or digits"); out.Ln; RETURN
+  END;
+  COPY(S.s, old); Scan(S);
+  IF ~(S.class IN {Name, String}) THEN  (* deleting needs an explicit "" *)
+    out.String("texts.Replace: new text missing, quote texts with spaces or digits"); out.Ln; RETURN
+  END;
+  COPY(S.s, new);
+  IF OpenEdit(name, T, plain) THEN
+    oldlen := 0; WHILE old[oldlen] # 0X DO INC(oldlen) END;
+    newlen := 0; WHILE new[newlen] # 0X DO INC(newlen) END;
+    n := 0; pos := Find(T, 0, old);
+    WHILE pos >= 0 DO
+      OpenReader(R, T, pos); Read(R, ch);
+      OpenWriter(W); SetFont(W, R.lib); SetColor(W, R.col); SetOffset(W, R.voff);
+      Delete(T, pos, pos + oldlen);
+      IF newlen > 0 THEN WriteString(W, new); Insert(T, pos, W.buf) END;
+      INC(n); pos := Find(T, pos + newlen, old)
+    END;
+    out.String(name); out.Char(" "); out.Int(n, 0); out.String(" replaced"); out.Ln;
+    IF n > 0 THEN StoreEdit(name, T, plain) END
+  END
+END Replace;
+
+(** texts.DeleteLines file "text" ~ -- delete every line of the text file that contains
+  text. The file is stored like with texts.Replace. *)
+PROCEDURE DeleteLines*;
+VAR S: Scanner; name, pat: ARRAY 64 OF CHAR; T: Text; R: Reader; ch: CHAR; plain: BOOLEAN;
+  beg, end, m, n: LONGINT;
+BEGIN
+  OpenScanner(S, Oberon.Par.text, Oberon.Par.pos); Scan(S);
+  IF ~(S.class IN {Name, String}) THEN out.String("usage: texts.DeleteLines file text ~"); out.Ln; RETURN END;
+  COPY(S.s, name); Scan(S);
+  IF ~(S.class IN {Name, String}) THEN
+    out.String("texts.DeleteLines: text missing, quote texts with spaces or digits"); out.Ln; RETURN
+  END;
+  COPY(S.s, pat);
+  IF OpenEdit(name, T, plain) THEN
+    n := 0; beg := 0; m := Find(T, 0, pat);
+    WHILE m >= 0 DO
+      (* the line around m: from beg, the start of a line before m *)
+      OpenReader(R, T, beg); end := beg; Read(R, ch);
+      WHILE ~R.eot & ((end < m) OR (ch # 0DX) & (ch # 0AX)) DO
+        INC(end); IF (ch = 0DX) OR (ch = 0AX) THEN beg := end END; Read(R, ch)
+      END;
+      IF ~R.eot THEN INC(end) END;  (* with its line end *)
+      Delete(T, beg, end); INC(n); m := Find(T, beg, pat)
+    END;
+    out.String(name); out.Char(" "); out.Int(n, 0); out.String(" lines deleted"); out.Ln;
+    IF n > 0 THEN StoreEdit(name, T, plain) END
+  END
+END DeleteLines;
+
 PROCEDURE ShowFiles(rich: BOOLEAN);
 VAR S: Scanner;
 BEGIN

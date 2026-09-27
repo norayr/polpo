@@ -50,6 +50,21 @@ bin/x86/loksh texts.ShowPlain texts/UserGuide.Text | less
 Programs can call `texts.ShowFile(name, rich)`. `cat.Cat [-p]` still works but is
 deprecated.
 
+Edit texts from the console, Oberon texts and plain files alike:
+
+```
+bin/x86/loksh texts.Replace tools/System.Tool Oberon20.Scn.Fnt Syntax20.Scn.Fnt
+bin/x86/loksh texts.Replace notes.Text '"old words"' '"new words"'
+bin/x86/loksh texts.DeleteLines tools/System.Tool wishup.Tool
+```
+
+`texts.Replace file old new` replaces every occurrence; the new text keeps the font and
+colour of the old, and `""` as new deletes. `texts.DeleteLines file text` deletes every
+line containing the text. Texts with spaces or digits are quoted (in the Unix shell as
+`'"..."'`). The file is stored where it was found, the old version as `.Bak`; an Oberon
+text keeps its fonts and colours, a plain file stays plain. Texts with objects (gadgets)
+are left alone.
+
 ### X11 Oberon
 
 The same `bin/x86/loksh` starts the whole Oberon desktop:
