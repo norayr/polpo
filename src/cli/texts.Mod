@@ -189,11 +189,11 @@ END Color;
 
 (** Write the text file name to standard output, plain ASCII files too. rich: fonts and
   colours as VT100 attributes, bold and italic fonts bold and italic, sizes above the main
-  size of the text (headings) bold and underlined; else the characters only. Objects in
+  size of the text (headings) bold; else the characters only. Objects in
   the text are left out. *)
 PROCEDURE ShowFile*(name: ARRAY OF CHAR; rich: BOOLEAN);
 VAR f: Files.File; T: Text; R: Reader; ch: CHAR;
-  size, main: INTEGER; bold, italic, under, curBold, curItalic, curUnder: BOOLEAN; col, curCol: SHORTINT;
+  size, main: INTEGER; bold, italic, curBold, curItalic: BOOLEAN; col, curCol: SHORTINT;
 BEGIN
   f := Files.Old(name);
   IF f = NIL THEN out.String(name); out.String(" not found"); out.Ln; RETURN END;
@@ -201,30 +201,26 @@ BEGIN
   NEW(T); Open(T, name);
   IF rich THEN main := MainSize(T) END;
   OpenReader(R, T, 0); Read(R, ch);
-  curBold := FALSE; curItalic := FALSE; curUnder := FALSE; curCol := 15;
+  curBold := FALSE; curItalic := FALSE; curCol := 15;
   WHILE ~R.eot DO
     IF rich & (ch > " ") THEN  (* attributes change at visible characters only *)
       ParseFont(R.lib, size, bold, italic); col := R.col;
-      under := (main > 0) & (size > main);
-      IF under THEN bold := TRUE END;
-      IF (bold # curBold) OR (italic # curItalic) OR (under # curUnder) OR (col # curCol) THEN
-        Attr(0); curBold := bold; curItalic := italic; curUnder := under; curCol := col;
+      IF (main > 0) & (size > main) THEN bold := TRUE END;
+      IF (bold # curBold) OR (italic # curItalic) OR (col # curCol) THEN
+        Attr(0); curBold := bold; curItalic := italic; curCol := col;
         IF bold THEN Attr(1) END;
         IF italic THEN Attr(3) END;
-        IF under THEN Attr(4) END;
         Color(col)
       END
     END;
     IF IsCharacterLibrary(R.lib) THEN
       IF (ch >= " ") OR (ch = 09X) THEN out.Char(ch)
-      ELSIF ch = 0DX THEN
-        IF curUnder THEN Attr(0); curBold := FALSE; curItalic := FALSE; curUnder := FALSE; curCol := 15 END;
-        out.Ln
+      ELSIF ch = 0DX THEN out.Ln
       END
     END;
     Read(R, ch)
   END;
-  IF rich & (curBold OR curItalic OR curUnder OR (curCol # 15)) THEN Attr(0) END
+  IF rich & (curBold OR curItalic OR (curCol # 15)) THEN Attr(0) END
 END ShowFile;
 
 (* ----- editing texts from the console ----- *)

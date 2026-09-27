@@ -39,8 +39,8 @@ bin/x86/loksh hello.world
 ```
 
 Show an Oberon text on the terminal, with its styles and colours, or only its characters.
-Bold and italic fonts are shown bold and italic, larger sizes (headings) bold and
-underlined, with the terminal's own font:
+Bold and italic fonts are shown bold and italic, larger sizes (headings) bold, with the
+terminal's own font:
 
 ```
 bin/x86/loksh texts.Show texts/UserGuide.Text
