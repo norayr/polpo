@@ -7,7 +7,7 @@ MODULE ADecoder;   (*ms 30.06.97 / as 24.11.98 *)
 
 *)
 
-  IMPORT Files, Texts, Oberon, MenuViewers, TextFrames, Fonts, SYSTEM, OBM, Out;
+  IMPORT Files, Texts, Oberon, MenuViewers, TextFrames, Fonts, SYSTEM, OBM, Out, Root;
   
   VAR
     W: Texts.Writer; 
@@ -308,7 +308,7 @@ MODULE ADecoder;   (*ms 30.06.97 / as 24.11.98 *)
       nofImports, nofEntries, nofPtrs, nofComs, nofRecs : INTEGER;
       datasize, strconstsize, codesize, refpos, key : LONGINT;
       i, x, cd, beg ,end, time, tmp, endPC, mno, pno, cw, ldummy : LONGINT;
-      name: ARRAY 96 OF CHAR; modname: ARRAY 32 OF CHAR;
+      name: ARRAY 320 OF CHAR; modname: ARRAY 32 OF CHAR;
       str : ARRAY 128 OF CHAR;
       V: MenuViewers.Viewer; X, Y, j, dummy : INTEGER; 
       nextProc : ARRAY 128 OF CHAR;
@@ -348,7 +348,7 @@ MODULE ADecoder;   (*ms 30.06.97 / as 24.11.98 *)
     IF s.class = Texts.Name THEN
       i := 0; WHILE (s.s[i] # 0X) & (s.s[i] # ".") DO INC(i) END;
       s.s[i] := 0X;
-      OBM.prefix:="obj/arm/";
+      Root.Obj("arm", OBM.prefix);
 
       OBM.MakeFileName(s.s, name, OBM.OFext);
 (*

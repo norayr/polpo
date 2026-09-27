@@ -195,6 +195,13 @@ BEGIN
   SYSTEM.CODE( JALR);
 END Openat0;
 
+PROCEDURE Readlinkat0*( dfd, name, buf, bufsiz: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 78);        (* readlinkat *)
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END Readlinkat0;
+
 PROCEDURE Close0*( fd: LONGINT): LONGINT;
 BEGIN
   SYSTEM.PUTREG( NRR, 57);        (* close *)

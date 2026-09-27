@@ -7,6 +7,7 @@
 # ARMv7 runtime
 a7compiler.Compile /s src/cli/armv7/Linux0.Mod
 a7compiler.Compile /s src/cli/rop2/Kernel.Mod
+a7compiler.Compile /s src/common/Root.Mod
 a7compiler.Compile /s src/common/Reals.Mod
 a7compiler.Compile /s src/common/POLPO.Files.Mod
 a7compiler.Compile /s src/cli/rop2/Modules0.Mod
@@ -80,4 +81,4 @@ a7compiler.Compile /s src/desktop/rop2/RCompiler.Mod
 a7compiler.Compile /s src/desktop/armv7/A32Decoder.Mod
 
 # static ARMv7 executable: modules in import order
-rlinker.Link /a bin/armv7/loksh.new Linux0 Kernel Modules0 loksh
+rlinker.Link /a bin/armv7/loksh.new Linux0 Kernel Root Modules0 loksh

@@ -17,7 +17,7 @@ MODULE alinker;   (* as 5.12.98 *)  (** command-line ARM boot linker *)
     
 *)
 
-  IMPORT Linux0, Files, Texts := texts, Out := out, Oberon := Oberon0, SYSTEM, OBM;
+  IMPORT Linux0, Files, Root, Texts := texts, Out := out, Oberon := Oberon0, SYSTEM, OBM;
 
   CONST
   RDonly= 0;  WRonly= 1;  RDWR=2;  OCREAT=40H;  OEXCL=80H;  OTRUNC= 200H;  OAPPEND=400H;  (* from X86 & ARM*)
@@ -393,7 +393,7 @@ VAR
   PROCEDURE LoadObject(modname : ARRAY OF CHAR; VAR o : Object);
   VAR
     f : Files.File; r : Files.Rider; tag, tag2 : SHORTINT;
-    name : ARRAY 96 OF CHAR;
+    name : ARRAY 320 OF CHAR;
     str : ARRAY 32 OF CHAR;
     i, key : LONGINT;
     p : Object;
@@ -770,7 +770,7 @@ END BuildImage;
     FOR i := 0 TO MaxModules-1 DO initCalls[i] := NIL END;
     IF code = NIL THEN NEW(code, 30000H) END;
     FOR i := 0 TO LEN(code^)-1 DO code[i] := 0 END;
-    quiet := FALSE; COPY("obj/arm/", OBM.prefix); out[0] := 0X;
+    quiet := FALSE; Root.Obj("arm", OBM.prefix); out[0] := 0X;
     Texts.OpenScanner(s, Oberon.Par.text, Oberon.Par.pos); Texts.Scan(s);
     WHILE s.class = Texts.Name DO
       IF (s.s[0] = "/") OR (s.s[0] = "\") THEN

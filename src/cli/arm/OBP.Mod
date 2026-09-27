@@ -8,7 +8,7 @@
 
 MODULE OBP;   (*NW 7.6.87 / 21.8.92 / 14.12.93*)  (** shared ARM compiler parser, UI-free *)
 
-  IMPORT SYSTEM, Texts := Texts0, Oberon := Oberon0, OBS, OBT, OBA, OBC, OBE, OBH, OC := OBM;
+  IMPORT SYSTEM, Texts := Texts0, Oberon := Oberon0, Root, OBS, OBT, OBA, OBC, OBE, OBH, OC := OBM;
 
   CONST
     NofCases = 128; ModNameLen = 20; 
@@ -983,7 +983,7 @@ MODULE OBP;   (*NW 7.6.87 / 21.8.92 / 14.12.93*)  (** shared ARM compiler parser
   PROCEDURE CompilationUnit*(source: Texts.Text; pos: LONGINT);
     VAR L0: INTEGER; ch: CHAR;
         time, date, key: LONGINT;
-        impid, FName: ARRAY 96 OF CHAR;
+        impid, FName: ARRAY 320 OF CHAR;
 
   BEGIN
     dsize := 0; LoopLevel := 0; ExitNo := 0; 
@@ -1060,7 +1060,7 @@ MODULE OBP;   (*NW 7.6.87 / 21.8.92 / 14.12.93*)  (** shared ARM compiler parser
     OBE.inxchk := TRUE; OBC.typchk := TRUE; OBH.clrchk := TRUE;
     OBE.ovfchk := FALSE; newSF := FALSE; statistics := FALSE; statsEmpty := TRUE;
     noFiles := FALSE; OBC.trapPos := MAX(LONGINT);
-    OC.prefix := "obj/arm/"
+    Root.Obj("arm", OC.prefix)
   END SetDefaults;
 
   (** Toggle options named by the characters of opt: x index checks, t type checks,

@@ -19,7 +19,7 @@ MODULE Modules0;  (* RC 14.2.94 *)  (* object model *)  (** MIPS/RISC-V/ARMv7 dy
   (* polpo: renamed to Modules0 like the x86 and ARM loaders: object path objPath with SetPath;
      the body starts nothing, the linked top module (loksh or System) selects the startup command. *)
 
-  IMPORT Linux0, Kernel, S := SYSTEM;
+  IMPORT Linux0, Kernel, Root, S := SYSTEM;
 
   TYPE
     ModuleName* = Kernel.Name;
@@ -41,7 +41,7 @@ MODULE Modules0;  (* RC 14.2.94 *)  (* object model *)  (** MIPS/RISC-V/ARMv7 dy
   VAR
     res*: INTEGER;
     resMsg*: ARRAY 256 OF CHAR;
-    objPath*: ARRAY 128 OF CHAR;  (** directory prefix of object files, ends with "/" *)
+    objPath*: ARRAY 256 OF CHAR;  (** directory prefix of object files, ends with "/" *)
     resMsgLen: LONGINT;
     imported, importing, objname: ModuleName;
 
@@ -587,7 +587,7 @@ END FindMod;
   END LoadModule;
 
   PROCEDURE Load( name: ARRAY OF CHAR; VAR m: Module);
-    VAR f: File; i, j, sp: LONGINT; fname: ARRAY 160 OF CHAR; tag: INTEGER; 
+    VAR f: File; i, j, sp: LONGINT; fname: ARRAY 320 OF CHAR; tag: INTEGER; 
   BEGIN
     m := Kernel.modules; res := done;
     WHILE (m # NIL) & (name # m.name) DO m := m.next END ;
@@ -710,8 +710,8 @@ BEGIN  (* entry of boot file, must not return *)
 *)
 (*  Test;*)
   Kernel.Static:=FALSE;
-  IF Linux0.ARCH = "MIPS" THEN COPY("obj/mips/", objPath)
-  ELSIF Linux0.ARCH = "RISC-V" THEN COPY("obj/riscv/", objPath)
-  ELSE COPY("obj/armv7/", objPath)
+  IF Linux0.ARCH = "MIPS" THEN Root.Obj("mips", objPath)
+  ELSIF Linux0.ARCH = "RISC-V" THEN Root.Obj("riscv", objPath)
+  ELSE Root.Obj("armv7", objPath)
   END
 END Modules0.

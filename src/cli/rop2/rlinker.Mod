@@ -21,7 +21,7 @@ MODULE rlinker;  (* RC 2.12.93 *)  (* object model *)  (** command-line MIPS/RIS
     by default the host architecture (Linux0.ARCH) and obj/<arch>/.
     
 *)
-  IMPORT S := SYSTEM, Linux0, Files, Oberon := Oberon0, Texts := texts, Con := out;
+  IMPORT S := SYSTEM, Linux0, Files, Root, Oberon := Oberon0, Texts := texts, Con := out;
 
   CONST
     MIPS=1; RISCV=2; ARMv7=3; ARMv8=4; TEST=5;
@@ -53,7 +53,7 @@ MODULE rlinker;  (* RC 2.12.93 *)  (* object model *)  (** command-line MIPS/RIS
     showEntries : BOOLEAN;
     heap: S.PTR;
     ptrFix: ARRAY NofPtrFix OF LONGINT;
-    dir: ARRAY 128 OF CHAR;  (* object file directory *)
+    dir: ARRAY 256 OF CHAR;  (* object file directory *)
     ptrFixx: LONGINT;
     arch: LONGINT;
     archs: ARRAY TEST+1 OF ARRAY 6 OF CHAR;
@@ -834,7 +834,7 @@ END Fixup;
   END LoadModule;
 
   PROCEDURE Load(name: ARRAY OF CHAR; VAR m: Module);
-    VAR f: Files.File; R: Files.Rider; i, j: INTEGER; fname: ARRAY 192 OF CHAR; ch: CHAR;
+    VAR f: Files.File; R: Files.Rider; i, j: INTEGER; fname: ARRAY 320 OF CHAR; ch: CHAR;
   BEGIN
     m := S.VAL(Module, modules); res := done;
     WHILE (m # NIL) & (name # m.name) DO m := m.next END;
@@ -1085,9 +1085,9 @@ END MkELF64hdr;
       Texts.Scan(s)
     END;
     IF ~dirSet THEN
-      IF arch = MIPS THEN COPY("obj/mips/", dir)
-      ELSIF arch = ARMv7 THEN COPY("obj/armv7/", dir)
-      ELSE COPY("obj/riscv/", dir)
+      IF arch = MIPS THEN Root.Obj("mips", dir)
+      ELSIF arch = ARMv7 THEN Root.Obj("armv7", dir)
+      ELSE Root.Obj("riscv", dir)
       END
     END;
     IF s.class = Texts.Name THEN COPY(s.s, bootName); Texts.Scan(s) END;

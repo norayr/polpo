@@ -24,7 +24,7 @@ polpo: renamed to Modules0 like the shared x86 loader: object path objPath
 
 *)
 
-IMPORT Linux0, Kernel, (* Kernel MUST be imported first! *) SYSTEM;
+IMPORT Linux0, Kernel, (* Kernel MUST be imported first! *) Root, SYSTEM;
 
 CONST
   trace = TRUE;
@@ -54,7 +54,7 @@ TYPE
 VAR
   res*: INTEGER;  (** Error code for ThisMod and ThisCommand. res = 0 indicates success. *)
   resMsg*: ARRAY 256 OF CHAR;  (** Explanation of res, if res # 0 *)
-  objPath*: ARRAY 128 OF CHAR;  (** directory prefix of object files, ends with "/" *)
+  objPath*: ARRAY 256 OF CHAR;  (** directory prefix of object files, ends with "/" *)
   
   (** The res codes are listed in the table below.
     done = 0;
@@ -406,7 +406,7 @@ END LoadModule;
 
 PROCEDURE Load (name: ARRAY OF CHAR; VAR m: Module);
 CONST PROTREAD=1; PROTWRITE=2;
-VAR f: File; i, j: INTEGER; fname: ARRAY 160 OF CHAR; tag: CHAR; res2: LONGINT;
+VAR f: File; i, j: INTEGER; fname: ARRAY 320 OF CHAR; tag: CHAR; res2: LONGINT;
 BEGIN
   Find(name, m);  res := done;  resMsg := "";
   IF m = NIL THEN
@@ -543,7 +543,7 @@ END InstallTermHandler;
 BEGIN
   Kernel.Static:=FALSE;
   modLoadAddr:=Kernel.dynModBase;
-  COPY("obj/arm/", objPath)
+  Root.Obj("arm", objPath)
 END Modules0.
 
 (** Remarks:

@@ -6,6 +6,7 @@
 # MIPS runtime
 mcompiler.Compile /s src/cli/mips/Linux0.Mod
 mcompiler.Compile /s src/cli/rop2/Kernel.Mod
+mcompiler.Compile /s src/common/Root.Mod
 mcompiler.Compile /s src/common/Reals.Mod
 mcompiler.Compile /s src/common/POLPO.Files.Mod
 mcompiler.Compile /s src/cli/rop2/Modules0.Mod
@@ -79,4 +80,4 @@ mcompiler.Compile /s src/desktop/rop2/RCompiler.Mod
 mcompiler.Compile /s src/desktop/mips/M2Decoder.Mod
 
 # static MIPS executable: modules in import order
-rlinker.Link /m bin/mips/loksh.new Linux0 Kernel Modules0 loksh
+rlinker.Link /m bin/mips/loksh.new Linux0 Kernel Root Modules0 loksh

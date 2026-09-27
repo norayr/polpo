@@ -111,7 +111,7 @@ MODULE ROPM;  (* RC 6.3.89 / 9.2.94 *)  (* object model 9.2.94 *)  (** shared MI
     Eot* = 0X;
 
   TYPE
-    FileName = ARRAY 32 OF CHAR;
+    FileName = ARRAY 320 OF CHAR;  (* polpo: Dir may be an absolute path (Root) *)
 
   VAR
     MinReal*, MaxReal*: REAL;
@@ -355,7 +355,7 @@ MODULE ROPM;  (* RC 6.3.89 / 9.2.94 *)  (* object model 9.2.94 *)  (** shared MI
   END ObjWBytes;
 
   PROCEDURE NewRefObj*(VAR modName: ARRAY OF CHAR);
-    VAR FName: ARRAY 32 OF CHAR; dummyL: LONGINT; dummy: INTEGER;
+    VAR FName: FileName; dummyL: LONGINT; dummy: INTEGER;
   BEGIN
     errpos := 0;
     RefFile := Files.New(""); Files.Set(RefF, RefFile, 0);

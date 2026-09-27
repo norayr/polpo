@@ -206,7 +206,7 @@ PROCEDURE CompleteProcObj(modname: ARRAY OF CHAR;
                            VAR buf: ARRAY OF CHAR; VAR len: INTEGER;
                            dotpos, pfxlen: INTEGER);
 VAR
-  fname: ARRAY 192 OF CHAR;
+  fname: ARRAY 320 OF CHAR;
   f: Files.File;
   R: Files.Rider;
   nofCmds, i, j, matched: INTEGER;
@@ -360,7 +360,7 @@ END TryCompletePath;
 
 PROCEDURE TryComplete(VAR buf: ARRAY OF CHAR; VAR len: INTEGER);
 VAR
-  pat: ARRAY 192 OF CHAR;
+  pat: ARRAY 320 OF CHAR;
   i, dotpos, spacepos: INTEGER;
   res: LONGINT;
 BEGIN

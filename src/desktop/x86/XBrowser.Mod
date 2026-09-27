@@ -9,7 +9,7 @@ Refer to the license.txt file provided with this distribution. *)
 
 MODULE XBrowser;  (** portable, except where noted *)
   IMPORT
-    Kernel, Modules, OPM, OPS, OPT, OPV,
+    Kernel, Root, Modules, OPM, OPS, OPT, OPV,
     Files, Texts, Display, Oberon, Fonts;
 
   CONST
@@ -294,7 +294,7 @@ MODULE XBrowser;  (** portable, except where noted *)
           END
         END
       END;
-      OPM.outputPath:="obj/x86/";
+      Root.Obj("x86", OPM.outputPath);
       theMod:=GetModule(name);
       IF  theMod#NIL  THEN
         COPY(name, vname); Append(vname, ".Def"); NEW(T); Texts.Open(T, "");

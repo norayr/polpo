@@ -1,6 +1,6 @@
 MODULE compiler;  (** command-line version *)
   IMPORT
-    OPP, OPB, OPV, OPT, OPS, OPC, OPL, OPO, OPM, Kernel, Texts := texts, Oberon := Oberon0, Out := out;
+    OPP, OPB, OPV, OPT, OPS, OPC, OPL, OPO, OPM, Kernel, Root, Texts := texts, Oberon := Oberon0, Out := out;
 
   CONST
     NoBreakPC = -1;
@@ -78,7 +78,7 @@ MODULE compiler;  (** command-line version *)
       IF name[i] # "." THEN i := 0 ELSE INC(i) END;
       pref[i] := 0X
     END;
-    IF path[0] = 0X THEN COPY("obj/x86/", path) END;
+    IF path[0] = 0X THEN Root.Obj("x86", path) END;
   END ParseOptions;
 
   PROCEDURE WriteMsg(source: Texts.Reader);

@@ -9,7 +9,7 @@ Refer to the license.txt file provided with this distribution. *)
 
 MODULE browser;  (** portable, except where noted *)
   IMPORT
-    Kernel, Modules := Modules0, OPM, OPS, OPT, OPV,
+    Kernel, Root, Modules := Modules0, OPM, OPS, OPT, OPV,
     Files, Texts := texts, (*Display,*) Oberon := Oberon0(*, Fonts*), out;
 
   CONST
@@ -332,7 +332,7 @@ MODULE browser;  (** portable, except where noted *)
           END
         END
       END;
-      OPM.outputPath:="obj/x86/";
+      Root.Obj("x86", OPM.outputPath);
       theMod:=GetModule(name);
       IF  theMod#NIL  THEN
         COPY(name, vname); Append(vname, ".Def"); NEW(T); Texts.Open(T, "");

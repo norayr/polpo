@@ -7,6 +7,7 @@
 # ARM runtime (objects in obj/arm/)
 acompiler.Compile /s src/cli/arm/Linux0.Mod
 acompiler.Compile /s /x src/cli/arm/Kernel.Mod
+acompiler.Compile /s src/common/Root.Mod
 acompiler.Compile /s src/common/Reals.Mod
 acompiler.Compile /s src/common/POLPO.Files.Mod
 acompiler.Compile /s src/cli/arm/Modules0.Mod

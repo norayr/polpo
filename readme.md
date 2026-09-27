@@ -181,8 +181,12 @@ that is not positive, while the x86 compiler computes the floored result.
 * `share/` - data files (`Default.Pal`, `OPA.Data`, `System.Text`, ...)
 * `fonts/`, `texts/` - fonts and documentation texts; `Oberon.Text` is the configuration
 
-`Files.Old` looks for a plain file name in the current directory, then in `share/`
-and `tools/`, so `Edit.Open System.Tool` and the like work from the polpo directory.
+`bin/<arch>/loksh` finds the polpo root from its own location (`/proc/self/exe`,
+also through symlinks and `PATH`), or from the environment variable `POLPO`. So it
+can be started from any directory: object files are loaded from `obj/<arch>/` in the
+current directory if it exists there, else from the root. `Files.Old` looks for a plain
+file name in the current directory, then in the root and its `share/`, `tools/` and
+`fonts/`, so `Oberon.Text`, `Edit.Open System.Tool` and fonts are found from anywhere.
 
 ---
 

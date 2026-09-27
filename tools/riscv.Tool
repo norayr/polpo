@@ -6,6 +6,7 @@
 # RISC-V runtime
 rvcompiler.Compile /s src/cli/riscv/Linux0.Mod
 rvcompiler.Compile /s src/cli/rop2/Kernel.Mod
+rvcompiler.Compile /s src/common/Root.Mod
 rvcompiler.Compile /s src/common/Reals.Mod
 rvcompiler.Compile /s src/common/POLPO.Files.Mod
 rvcompiler.Compile /s src/cli/rop2/Modules0.Mod
@@ -79,4 +80,4 @@ rvcompiler.Compile /s src/desktop/rop2/RCompiler.Mod
 rvcompiler.Compile /s src/desktop/riscv/VDecoder.Mod
 
 # static RISC-V executable: modules in import order
-rlinker.Link /v bin/riscv/loksh.new Linux0 Kernel Modules0 loksh
+rlinker.Link /v bin/riscv/loksh.new Linux0 Kernel Root Modules0 loksh

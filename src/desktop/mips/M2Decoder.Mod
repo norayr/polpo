@@ -11,7 +11,7 @@ MODULE M2Decoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
 
 *)
 
-  IMPORT Texts, Oberon, Viewers, MenuViewers, TextFrames, Files, Fonts, SYSTEM;
+  IMPORT Texts, Oberon, Viewers, MenuViewers, TextFrames, Files, Fonts, SYSTEM, Root;
   
   CONST
     OptionChar = "\";
@@ -30,7 +30,7 @@ MODULE M2Decoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
     Real = 7; LReal = 8; Set = 9; String = 10; NilTyp = 11; NoTyp = 12;
     Pointer = 13; ProcTyp = 14; Comp = 15;
 
-    nlen = 64;
+    nlen = 320;  (* polpo: file names may contain an absolute object directory *)
     CodeLength = 32000;
     
   TYPE
@@ -762,14 +762,14 @@ END MkLabels;
 
 PROCEDURE Obt*;
 BEGIN
-  dir:="obj/test/";
+  Root.Obj("test", dir);
   fileTag:=Taga;
   Obj;
 END Obt;
 
 PROCEDURE Obm*;
 BEGIN
-  dir:="obj/mips/";
+  Root.Obj("mips", dir);
   fileTag:=Tagm;
   Obj;
 END Obm;

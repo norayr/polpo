@@ -10,7 +10,7 @@ Refer to the license.txt file provided with this distribution. *)
 
 MODULE XCompiler;  (** portable, except where noted *)
   IMPORT
-    OPP, OPB, OPV, OPT, OPS, OPC, OPL, OPO, OPM, Modules, Display, Oberon, Texts;
+    OPP, OPB, OPV, OPT, OPS, OPC, OPL, OPO, OPM, Modules, Display, Oberon, Texts, Root;
   
   CONST
     NoBreakPC = -1;
@@ -140,7 +140,7 @@ MODULE XCompiler;  (** portable, except where noted *)
       IF name[i] # "." THEN i := 0 ELSE INC(i) END;
       pref[i] := 0X
     END;
-    COPY("obj/x86/",path);
+    Root.Obj("x86", path);
   END ParseOptions;
   
   PROCEDURE WriteMsg(source: Texts.Reader;  log: Texts.Text);

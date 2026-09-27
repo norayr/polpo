@@ -12,7 +12,7 @@ MODULE Modules0;  (** shared dynamic loader *)
 
 *)
 
-IMPORT Kernel, Files, SYSTEM;
+IMPORT Kernel, Files, Root, SYSTEM;
 
 CONST
   done = 0;
@@ -51,7 +51,7 @@ VAR
   resMsg*: ARRAY 256 OF CHAR;  (** Explanation of res, if res # 0 *)
 (*  extension*: ARRAY 8 OF CHAR;  (** Extension of object files (non-portable) *)*)
   resMsgLen: LONGINT;
-  objPath*: ARRAY 128 OF CHAR;
+  objPath*: ARRAY 256 OF CHAR;
 
   (** The res codes are listed in the table below.
     done = 0;
@@ -722,7 +722,7 @@ BEGIN (* LoadModule *)
 END LoadModule;
 
 PROCEDURE Load(name: ARRAY OF CHAR; VAR m: Module);
-  VAR f: Files.File; R: Files.Rider; i, j: INTEGER; fname: ARRAY 128 OF CHAR; tag: CHAR;
+  VAR f: Files.File; R: Files.Rider; i, j: INTEGER; fname: ARRAY 320 OF CHAR; tag: CHAR;
 BEGIN
   m := FindMod(name); res := done; Clear;
   IF m = NIL THEN
@@ -840,7 +840,7 @@ END InstallTermHandler;
 BEGIN
   trace := TRUE;
   Kernel.Static := FALSE;
-  COPY("obj/x86/", objPath)
+  Root.Obj("x86", objPath)
 END Modules0.
 
 (** Remarks:

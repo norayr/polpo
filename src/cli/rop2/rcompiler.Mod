@@ -1,7 +1,7 @@
 MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V, ARMv7 *)
 (* after RCompiler (ROP2), RC 6.3.89 / 17.6.93, p.m. 2017-06-12 *)
   IMPORT
-    OPM := ROPM, OPT := ROPT, OPP := ROPP, Modules, Linux0,
+    OPM := ROPM, OPT := ROPT, OPP := ROPP, Modules, Linux0, Root,
     Texts := texts, Oberon := Oberon0, Out := out;
 
   CONST
@@ -12,7 +12,7 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
     defopt = {inxchk, typchk, ptrinit, assert};
 
   VAR
-    dir*: ARRAY 64 OF CHAR;  (** object and symbol file directory *)
+    dir*: ARRAY 256 OF CHAR;  (** object and symbol file directory *)
     tag: CHAR;  (* object file tag of the target *)
     target: ARRAY 32 OF CHAR;  (* name of the target *)
     backend: ARRAY 32 OF CHAR;  (* back end module: VOPV, MOPV, AOPV *)
@@ -133,19 +133,20 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
     Out.String("Options apply to the files that follow them."); Out.Ln
   END Help;
 
-  (** Select the target: back end module, object directory and object file tag. *)
-  PROCEDURE SetTarget*(name, backendMod, directory: ARRAY OF CHAR; objTag: CHAR);
+  (** Select the target: back end module, architecture (object directory obj/<arch>/, see Root)
+    and object file tag. *)
+  PROCEDURE SetTarget*(name, backendMod, arch: ARRAY OF CHAR; objTag: CHAR);
   BEGIN
-    COPY(name, target); COPY(backendMod, backend); COPY(directory, dir); tag := objTag;
+    COPY(name, target); COPY(backendMod, backend); Root.Obj(arch, dir); tag := objTag;
     (* ARMv7: software division by default, Cortex-A8 and A9 have no divide instruction *)
     IF name = "ARMv7" THEN targetopt := {softdiv} ELSE targetopt := {} END
   END SetTarget;
 
   PROCEDURE SetHostTarget;
   BEGIN
-    IF Linux0.ARCH = "MIPS" THEN SetTarget("MIPS", "MOPV", "obj/mips/", mipstag)
-    ELSIF Linux0.ARCH = "ARMv7" THEN SetTarget("ARMv7", "AOPV", "obj/armv7/", armv7tag)
-    ELSE SetTarget("RISC-V", "VOPV", "obj/riscv/", riscvtag)
+    IF Linux0.ARCH = "MIPS" THEN SetTarget("MIPS", "MOPV", "mips", mipstag)
+    ELSIF Linux0.ARCH = "ARMv7" THEN SetTarget("ARMv7", "AOPV", "armv7", armv7tag)
+    ELSE SetTarget("RISC-V", "VOPV", "riscv", riscvtag)
     END
   END SetHostTarget;
 
@@ -165,9 +166,9 @@ MODULE rcompiler;  (** command-line frontend of the ROP2 compilers: MIPS, RISC-V
       COPY(S.s, name);
       IF (name = "/h") OR (name = "-h") OR (name = "--help") OR (name = "/help") THEN
         Help; RETURN
-      ELSIF name = "/v" THEN SetTarget("RISC-V", "VOPV", "obj/riscv/", riscvtag)
-      ELSIF name = "/m" THEN SetTarget("MIPS", "MOPV", "obj/mips/", mipstag)
-      ELSIF name = "/a" THEN SetTarget("ARMv7", "AOPV", "obj/armv7/", armv7tag)
+      ELSIF name = "/v" THEN SetTarget("RISC-V", "VOPV", "riscv", riscvtag)
+      ELSIF name = "/m" THEN SetTarget("MIPS", "MOPV", "mips", mipstag)
+      ELSIF name = "/a" THEN SetTarget("ARMv7", "AOPV", "armv7", armv7tag)
       ELSIF ((name[0] = "/") OR (name[0] = "\")) & (name[1] = "P") THEN
         i := 2; WHILE (name[i] # 0X) & (i-2 < LEN(dir)-1) DO dir[i-2] := name[i]; INC(i) END;
         dir[i-2] := 0X

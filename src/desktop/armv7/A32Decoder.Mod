@@ -10,7 +10,7 @@ MODULE A32Decoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
     2017-03-05  ReadIn: mods changed from 32 to 48
 *)
 
-  IMPORT Texts, Oberon, Viewers, MenuViewers, TextFrames, Files, Fonts, SYSTEM;
+  IMPORT Texts, Oberon, Viewers, MenuViewers, TextFrames, Files, Fonts, SYSTEM, Root;
   
   CONST
     OptionChar = "\";
@@ -23,7 +23,7 @@ MODULE A32Decoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
     Real = 7; LReal = 8; Set = 9; String = 10; NilTyp = 11; NoTyp = 12;
     Pointer = 13; ProcTyp = 14; Comp = 15;
 
-    nlen = 64;
+    nlen = 320;  (* polpo: file names may contain an absolute object directory *)
     CodeLength = 32000;
 
     Taga= 36FBH;    (* MIPS: 36F9H; MIPS test: 36FAH; ARM32 OP2: 36FBH; ARM ns compiler: ??; MIPS *)
@@ -654,7 +654,7 @@ MODULE A32Decoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
       c, offset, L, L1, cd: LONGINT;
       tag, i: INTEGER;
   BEGIN
-    dir:="obj/armv7/";
+    Root.Obj("armv7", dir);
     fileTag:=Taga;
     GetArgs(S);
     IF S.class # Texts.Name THEN RETURN END ;

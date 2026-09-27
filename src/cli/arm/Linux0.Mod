@@ -186,6 +186,17 @@ CODE
   MOV  PC, LR
 END Openat0;
 
+PROCEDURE Readlinkat0*( dirfd, name, buf, bufsiz: LONGINT): LONGINT;
+CODE
+  LDR  R3, [SP],4
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 332      (* READLINKAT=332 *)
+  SWI  0
+  MOV  PC, LR
+END Readlinkat0;
+
 PROCEDURE Creat0*( name, mode: LONGINT): LONGINT;
 CODE
   LDR  R1, [SP],4

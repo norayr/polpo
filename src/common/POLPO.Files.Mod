@@ -47,7 +47,7 @@ PROCEDURE Unmount( volume: Volume): LONGINT;
 
 *)
 
-IMPORT Linux0, Kernel, SYSTEM;
+IMPORT Linux0, Kernel, Root, SYSTEM;
 
 CONST
 
@@ -84,7 +84,8 @@ VAR
   trace: BOOLEAN;
 (* Check a file name. *)
   sysfd, wrkfd: LONGINT;
-  searchPath: ARRAY 2 OF ARRAY 8 OF CHAR;  (* polpo: directories tried by Old for plain names *)
+  searchPath: ARRAY 5 OF FileName;  (* polpo: directories tried by Old for plain names *)
+  nofSearch: LONGINT;
 
 PROCEDURE SetSYS*( s: ARRAY OF CHAR);
 BEGIN
@@ -188,7 +189,7 @@ BEGIN
   RETURN fd
 END OpenRW;
 
-(* polpo: try a plain file name in the directories of searchPath (share/, tools/);
+(* polpo: try a plain file name in the directories of searchPath (root, share/, tools/, fonts/);
    on success name becomes the path that was found. *)
 PROCEDURE OpenSearch(VAR name: ARRAY OF CHAR): LONGINT;
 VAR fd, i, j, k: LONGINT; path: FileName;
@@ -196,7 +197,7 @@ BEGIN
   i:=0; WHILE (name[i]#0X) & (name[i]#"/") DO INC(i) END;
   IF name[i]="/" THEN RETURN -2 END;
   fd:=-2; k:=0;
-  WHILE (fd<=0) & (k<LEN(searchPath)) DO
+  WHILE (fd<=0) & (k<nofSearch) DO
     i:=0; WHILE searchPath[k][i]#0X DO path[i]:=searchPath[k][i]; INC(i) END;
     j:=0; WHILE (name[j]#0X) & (i<LEN(path)-1) DO path[i]:=name[j]; INC(i); INC(j) END;
     path[i]:=0X;
@@ -559,7 +560,12 @@ BEGIN
   trace:= Kernel.trace="Files";
   SetSYS(".");
   SetWRK("");
-  searchPath[0]:="share/"; searchPath[1]:="tools/";
+  (* polpo: plain names are also looked up in the polpo root and its share/, tools/, fonts/ *)
+  nofSearch:=0;
+  IF Root.path#"" THEN COPY(Root.path, searchPath[0]); nofSearch:=1 END;
+  Root.Join("share/", searchPath[nofSearch]); INC(nofSearch);
+  Root.Join("tools/", searchPath[nofSearch]); INC(nofSearch);
+  Root.Join("fonts/", searchPath[nofSearch]); INC(nofSearch);
 END Files.
 
 (** Remarks:

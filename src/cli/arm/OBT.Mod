@@ -244,7 +244,7 @@ MODULE OBT;  (*NW 28.5.87 / 10.7.93*)
         ch, ch1: CHAR;
         si: SHORTINT;
         SymFile: Files.File; R: Files.Rider;
-        modname: ARRAY 32 OF CHAR; FileName: ARRAY 96 OF CHAR;
+        modname: ARRAY 32 OF CHAR; FileName: ARRAY 320 OF CHAR;
         LocMod:  ARRAY maxMod OF Object;
         struct:  ARRAY maxStr OF Struct;
         lastpar, lastfld: ARRAY maxParLev OF Object;

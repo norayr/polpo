@@ -224,6 +224,16 @@ BEGIN
   SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
 END Openat0;
 
+PROCEDURE Readlinkat0*( dfd, name, buf, bufsiz: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4298);        (* readlinkat, Syscall nr to R2 *)
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END Readlinkat0;
+
 PROCEDURE Close0*( fd: LONGINT): LONGINT;
 BEGIN
   SYSTEM.PUTREG( 2, 4006);        (* close *)

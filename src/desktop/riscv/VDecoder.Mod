@@ -11,7 +11,7 @@ MODULE VDecoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
 
 *)
 
-  IMPORT Texts, Oberon, Viewers, MenuViewers, TextFrames, Files, Fonts, SYSTEM;
+  IMPORT Texts, Oberon, Viewers, MenuViewers, TextFrames, Files, Fonts, SYSTEM, Root;
   
   CONST
     OptionChar = "\";
@@ -27,7 +27,7 @@ MODULE VDecoder;  (* rc 20.11.89 / 5.5.93 *)  (* object model 4.12.93 *)
     Real = 7; LReal = 8; Set = 9; String = 10; NilTyp = 11; NoTyp = 12;
     Pointer = 13; ProcTyp = 14; Comp = 15;
 
-    nlen = 64;
+    nlen = 320;  (* polpo: file names may contain an absolute object directory *)
     CodeLength = 32000;
 
     RA=1; T0=7;  (* temp reg *)
@@ -783,7 +783,7 @@ END MkLabels;
       c, offset, L, L1: LONGINT;
       tag, i: INTEGER;
   BEGIN
-    dir:="obj/riscv/";
+    Root.Obj("riscv", dir);
     fileTag:=Tagv;
     GetArgs(S);
     IF S.class # Texts.Name THEN RETURN END ;

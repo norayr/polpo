@@ -3,7 +3,7 @@ MODULE rvcompiler;  (** command-line RISC-V compiler, see rcompiler *)
 
   PROCEDURE Compile*;
   BEGIN
-    rcompiler.SetTarget("RISC-V", "VOPV", "obj/riscv/", rcompiler.riscvtag); rcompiler.CompileTarget
+    rcompiler.SetTarget("RISC-V", "VOPV", "riscv", rcompiler.riscvtag); rcompiler.CompileTarget
   END Compile;
 
   PROCEDURE Help*;

@@ -11,7 +11,7 @@ MODULE ABrowser;  (** portable, except where noted *) (* MH/JT/PRK 24.9.96*)
   2015-07-07  using OBM.prefix:="arm/" 
 *)
 
-IMPORT OBT, OBS, OBM, Files, Texts, Oberon, Display, Out, SYSTEM;
+IMPORT OBT, OBS, OBM, Files, Root, Texts, Oberon, Display, Out, SYSTEM;
 
 CONST
 
@@ -365,13 +365,13 @@ BEGIN
 END QualIdent;
 
 PROCEDURE ShowDef*;  (** [ "/" ["x"] ["d"] ] **)
-  VAR S: Texts.Scanner; symname: ARRAY 96 OF CHAR; mod, dummy : ARRAY 32 OF CHAR; f: Files.File;
+  VAR S: Texts.Scanner; symname: ARRAY 320 OF CHAR; mod, dummy : ARRAY 32 OF CHAR; f: Files.File;
     errmsg : ARRAY 64 OF CHAR;
 BEGIN
   errmsg:=""; OBS.scanerr := FALSE;
   GetArgs(S);
   IF S.class=Texts.Name THEN
-    OBM.prefix:="obj/arm/";
+    Root.Obj("arm", OBM.prefix);
     QualIdent(S.s, mod, dummy);
     OBM.MakeFileName(mod,symname,OBM.SFext); f := Files.Old(symname);
     IF f = NIL THEN Str(symname); Str(" not found"); Ln; Texts.Append(Oberon.Log, W.buf); RETURN END;
@@ -387,7 +387,7 @@ BEGIN
 END ShowDef;
 
 PROCEDURE ShowObj*;  (** [ "/" ["x"] ["d"] ] **)  (** non-portable *)
-  VAR S: Texts.Scanner; symname: ARRAY 96 OF CHAR; mod, objName, qualid: ARRAY 32 OF CHAR; obj: OBT.Object; f: Files.File;
+  VAR S: Texts.Scanner; symname: ARRAY 320 OF CHAR; mod, objName, qualid: ARRAY 32 OF CHAR; obj: OBT.Object; f: Files.File;
     errmsg : ARRAY 64 OF CHAR;
 BEGIN
   errmsg:=""; OBS.scanerr := FALSE;

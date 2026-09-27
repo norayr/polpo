@@ -3,7 +3,7 @@ MODULE mcompiler;  (** command-line MIPS compiler, see rcompiler *)
 
   PROCEDURE Compile*;
   BEGIN
-    rcompiler.SetTarget("MIPS", "MOPV", "obj/mips/", rcompiler.mipstag); rcompiler.CompileTarget
+    rcompiler.SetTarget("MIPS", "MOPV", "mips", rcompiler.mipstag); rcompiler.CompileTarget
   END Compile;
 
   PROCEDURE Help*;

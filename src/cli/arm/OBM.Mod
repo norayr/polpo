@@ -53,7 +53,7 @@ MODULE OBM;  (* as 8.2.99 *)
       RestoreInterruptsTrap* = 108H;
 
   VAR
-    prefix* : ARRAY 64 OF CHAR;
+    prefix* : ARRAY 256 OF CHAR;
     
   PROCEDURE MakeFileName*(name : ARRAY OF CHAR; VAR FName: ARRAY OF CHAR; ext: ARRAY OF CHAR);
     VAR i, j: INTEGER; ch: CHAR;

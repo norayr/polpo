@@ -10,7 +10,7 @@ MODULE RCompiler;  (* RC 6.3.89 / 17.6.93 *)  (* object model 19.1.94 *)
 
   IMPORT
     Modules, Texts, TextFrames, Viewers, Oberon,
-    OPM :=ROPM, OPT := ROPT, OPP := ROPP, Linux0;
+    OPM :=ROPM, OPT := ROPT, OPP := ROPP, Linux0, Root;
   
   CONST
     mipstag=0F9X; mipsttag= 0FAX; armv7tag=0FBX; armv8tag=0FCX; riscvtag=0FDX;  (* same as in RBootLinker *)
@@ -190,32 +190,32 @@ BEGIN
   IF OPV=NIL THEN Texts.WriteString(W, mod); Texts.WriteString(W, " Module not found"); Texts.WriteLn(W); Texts.Append(Oberon.Log, W.buf);
   ELSE
     OPM.OFtag := tag;
-    COPY(dir, OPM.Dir);
+    Root.Obj(dir, OPM.Dir);  (* polpo: dir is the architecture, obj/<arch>/ *)
     Compile0;
   END;
 END Compile1;
 
 PROCEDURE CompileA*;
-BEGIN  Compile1("AOPV", "obj/armv7/", armv7tag);
+BEGIN  Compile1("AOPV", "armv7", armv7tag);
 END CompileA;
 
 PROCEDURE CompileM*;
-BEGIN  Compile1("MOPV", "obj/mips/", mipstag);
+BEGIN  Compile1("MOPV", "mips", mipstag);
 END CompileM;
 
 PROCEDURE CompileT*;
-BEGIN  Compile1("TOPV", "obj/test/", mipsttag);
+BEGIN  Compile1("TOPV", "test", mipsttag);
 END CompileT;
 
 PROCEDURE CompileV*;
-BEGIN  Compile1("VOPV", "obj/riscv/", riscvtag);
+BEGIN  Compile1("VOPV", "riscv", riscvtag);
 END CompileV;
 
 PROCEDURE Compile*;
 BEGIN
-  IF Linux0.ARCH="MIPS" THEN Compile1("MOPV", "obj/mips/", mipstag);
-  ELSIF  Linux0.ARCH="RISC-V" THEN Compile1("VOPV", "obj/riscv/", riscvtag);
-  ELSE Compile1("AOPV", "obj/armv7/", armv7tag)
+  IF Linux0.ARCH="MIPS" THEN Compile1("MOPV", "mips", mipstag);
+  ELSIF  Linux0.ARCH="RISC-V" THEN Compile1("VOPV", "riscv", riscvtag);
+  ELSE Compile1("AOPV", "armv7", armv7tag)
   END; 
 END Compile;
 

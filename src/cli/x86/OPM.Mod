@@ -138,7 +138,7 @@ MODULE OPM;  (** shared x86 compiler manager *)
     breakpos*: LONGINT;  (* set by Mark *)
     breakpc*: LONGINT;  (*set by OPV.Init*)
     errors: ARRAY NumErrors DIV SetLen OF SET;
-    outputPath*: ARRAY 32 OF CHAR;  (* for reading and writing obj files. must include any trailing "/" or ":" *)
+    outputPath*: ARRAY 256 OF CHAR;  (* for reading and writing obj files. must include any trailing "/" or ":" *)
     outputPrefix*: ARRAY 32 OF CHAR;  (* for writing obj files (in addition to outputPath). *)
     codeOptions*, parserOptions*: SET;
     errName*: ARRAY 32 OF CHAR;

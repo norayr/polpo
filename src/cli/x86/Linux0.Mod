@@ -279,6 +279,17 @@ CODE {SYSTEM.i386}
   INT  80H
 END Openat0;
 
+PROCEDURE Readlinkat0*( dirfd, name, buf, bufsiz: LONGINT): LONGINT;
+CONST READLINKAT= 131H;  (* 305 *)
+CODE {SYSTEM.i386}
+  MOV  EAX, READLINKAT
+  MOV  EBX, dirfd[ EBP]
+  MOV  ECX, name[ EBP]
+  MOV  EDX, buf[ EBP]
+  MOV  ESI, bufsiz[ EBP]
+  INT  80H
+END Readlinkat0;
+
 (* use Open(.., Linux0.RDWR+Linux0.OCREAT+Linux0.OTRUNC, ...)
 PROCEDURE Creat0*( name, mode: LONGINT): LONGINT;
 CONST CREAT= 8;

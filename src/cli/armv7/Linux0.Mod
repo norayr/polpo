@@ -375,6 +375,14 @@ BEGIN
   SYSTEM.CODE(BX);  (* E1A0F00E  MOV PC,LR *)
 END Openat0;
 
+PROCEDURE Readlinkat0*( dirfd, name, buf, bufsiz: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA4);  (*LDMIA   SP!, {R0 R1 R2 R3} *)
+  SYSTEM.PUTREG(7, 332);        (* readlinkat *)
+  SYSTEM.CODE(SVC);  (* EF000000  SWI  0H *)
+  SYSTEM.CODE(BX);  (* E1A0F00E  MOV PC,LR *)
+END Readlinkat0;
+
 PROCEDURE Close0*( fd: LONGINT): LONGINT;
 BEGIN
   SYSTEM.CODE(LDMIA1);  (*LDMIA   SP, {R0 } *)

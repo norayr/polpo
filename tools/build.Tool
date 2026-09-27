@@ -1,6 +1,7 @@
 # common files for ui and cli oberon
-compiler.Compile src/cli/x86/Linux0.Mod
+compiler.Compile /s src/cli/x86/Linux0.Mod
 compiler.Compile src/cli/x86/Kernel.Mod
+compiler.Compile /s src/common/Root.Mod
 compiler.Compile src/common/Reals.Mod
 compiler.Compile src/common/POLPO.Files.Mod
 
@@ -44,7 +45,7 @@ compiler.Compile /s src/cli/x86/compiler.Mod
 compiler.Compile /s src/cli/x86/linker.Mod
 compiler.Compile /s src/cli/x86/browser.Mod
 
-linker.Link bin/x86/loksh2 /refs /integrate 8049000H obj/x86/Linux0 obj/x86/Kernel obj/x86/Files obj/x86/Modules0 obj/x86/loksh ~
+linker.Link bin/x86/loksh2 /refs /integrate 8049000H obj/x86/Linux0 obj/x86/Kernel obj/x86/Root obj/x86/Files obj/x86/Modules0 obj/x86/loksh ~
 
 # ui oberon
 compiler.Compile /s src/desktop/POLPO.Objects.Mod
