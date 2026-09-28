@@ -97,6 +97,8 @@ CONST
   defaultWidth=1280-16;
   defaultHeight=1024-32;
   MaxSixelWidth = 4096;
+  MaxRegs = 256;  (* polpo: most sixel colour registers used, SXL_COLORS *)
+  HashSize = 1024;  (* pixel value -> register, power of 2 *)
 
   STDERR=2;
 
@@ -283,8 +285,13 @@ VAR
   flushCount, lastFlush, lastDirty, flushDelay, quietDelay: LONGINT;
   outpos: LONGINT;
   outbuf: ARRAY 32768 OF CHAR;
-  sixelLine: ARRAY 16 OF ARRAY MaxSixelWidth OF CHAR;
-  sixelUsed: ARRAY 16 OF BOOLEAN;
+  sixelLine: ARRAY MaxRegs OF ARRAY MaxSixelWidth OF CHAR;  (* sixels of a band, per register; "?" when empty *)
+  sixelUsed: ARRAY MaxRegs OF BOOLEAN;
+  usedList: ARRAY MaxRegs OF INTEGER; nused: LONGINT;  (* registers used in the band *)
+  regPix: ARRAY MaxRegs OF LONGINT;  (* colour of each register in this frame *)
+  regDefined: ARRAY MaxRegs OF BOOLEAN;  (* its definition was sent in this frame *)
+  nregs, maxRegs, nhash: LONGINT;  (* registers assigned in this frame, most to assign, hash entries *)
+  hashPix: ARRAY HashSize OF LONGINT; hashReg: ARRAY HashSize OF INTEGER;  (* -1: empty *)
   xrv: POINTER TO ARRAY OF LONGINT;  (* X11 request vector *)
 
 (* common OLR  *)
@@ -375,46 +382,66 @@ END PutIntRaw;
 
 PROCEDURE^ GetColor*(col: Color; VAR red, green, blue: INTEGER);
 
-(* polpo: a pixel that is not one of the 16 sixel colours (inverted selections, true colours)
-   gets the nearest of them, instead of the foreground colour *)
-PROCEDURE PixelPaletteIndex( pix: LONGINT): LONGINT;
-VAR i, best, d, bestd, p, r, g, b, dr, dg, db: LONGINT; pr, pg, pb: INTEGER;
+(* polpo: sixel colour registers are assigned per frame as colours appear, up to maxRegs
+   (SXL_COLORS, default 256); then a colour gets the nearest register already assigned. *)
+PROCEDURE PixRGB( pix: LONGINT; VAR r, g, b: LONGINT);
+VAR p: LONGINT;
 BEGIN
-  i:=0;
-  WHILE i<16 DO
-    IF pix=palette[i] THEN RETURN i END;
-    INC(i)
-  END;
-  IF lastValid & (pix=lastPix) THEN RETURN lastIndex END;
   p:=pix MOD 1000000H;
   r:=ASH( ASH(p, -rmr), 8-rmw) MOD 256;
   g:=ASH( ASH(p, -gmr), 8-gmw) MOD 256;
-  b:=ASH( ASH(p, -bmr), 8-bmw) MOD 256;
-  best:=FG; bestd:=MAX(LONGINT); i:=0;
-  WHILE i<16 DO
-    GetColor(i, pr, pg, pb);
-    dr:=r-pr; dg:=g-pg; db:=b-pb;
-    d:=dr*dr + dg*dg + db*db;
-    IF d<bestd THEN bestd:=d; best:=i END;
-    INC(i)
-  END;
-  lastPix:=pix; lastIndex:=best; lastValid:=TRUE;
-  RETURN best
-END PixelPaletteIndex;
+  b:=ASH( ASH(p, -bmr), 8-bmw) MOD 256
+END PixRGB;
 
-PROCEDURE WriteSixelPalette;
-VAR i: LONGINT; r, g, b: INTEGER;
+PROCEDURE ResetRegisters;
+VAR i: LONGINT;
 BEGIN
-  i:=0;
-  WHILE i<16 DO
-    GetColor(i, r, g, b);
-    PutByte("#"); PutIntRaw(i); PutStringRaw(";2;");
+  nregs:=0; nhash:=0; lastValid:=FALSE;
+  i:=0; WHILE i<HashSize DO hashReg[i]:=-1; INC(i) END
+END ResetRegisters;
+
+PROCEDURE PixelRegister( pix: LONGINT): LONGINT;
+VAR h, i, best, d, bestd, r, g, b, r1, g1, b1: LONGINT;
+BEGIN
+  IF lastValid & (pix=lastPix) THEN RETURN lastIndex END;
+  lastPix:=pix;
+  pix:=pix MOD 1000000H;
+  h:=(pix DIV 10000H * 31 + pix DIV 100H MOD 100H * 7 + pix MOD 100H) MOD HashSize;
+  WHILE (hashReg[h]#-1) & (hashPix[h]#pix) DO h:=(h+1) MOD HashSize END;
+  IF hashReg[h]#-1 THEN best:=hashReg[h]
+  ELSE
+    IF nregs<maxRegs THEN
+      best:=nregs; regPix[best]:=pix; regDefined[best]:=FALSE; INC(nregs)
+    ELSE  (* registers used up: the nearest one *)
+      PixRGB(pix, r, g, b); best:=0; bestd:=MAX(LONGINT); i:=0;
+      WHILE i<nregs DO
+        PixRGB(regPix[i], r1, g1, b1);
+        d:=(r-r1)*(r-r1) + (g-g1)*(g-g1) + (b-b1)*(b-b1);
+        IF d<bestd THEN bestd:=d; best:=i END;
+        INC(i)
+      END
+    END;
+    nhash:=nhash+1;
+    IF nhash<HashSize-1 THEN hashPix[h]:=pix; hashReg[h]:=SHORT(best) END
+  END;
+  lastIndex:=best; lastValid:=TRUE;
+  RETURN best
+END PixelRegister;
+
+(* select register reg, defining its colour first when this frame has not yet *)
+PROCEDURE PutRegister( reg: LONGINT);
+VAR r, g, b: LONGINT;
+BEGIN
+  PutByte("#"); PutIntRaw(reg);
+  IF ~regDefined[reg] THEN
+    PixRGB(regPix[reg], r, g, b);
+    PutStringRaw(";2;");
     PutIntRaw(r*100 DIV 255); PutByte(";");
     PutIntRaw(g*100 DIV 255); PutByte(";");
     PutIntRaw(b*100 DIV 255);
-    INC(i)
+    regDefined[reg]:=TRUE
   END
-END WriteSixelPalette;
+END PutRegister;
 
 PROCEDURE PutSixelRun( ch: CHAR; count: LONGINT);
 VAR i: LONGINT;
@@ -429,7 +456,7 @@ BEGIN
 END PutSixelRun;
 
 PROCEDURE Flush;
-VAR sx, sy, bit, pix, adr, ci, pci, runLen, wlim: LONGINT; ch, lastCh: CHAR;
+VAR sx, sy, bit, pix, adr, ci, pci, runLen, wlim, i: LONGINT; ch, lastCh: CHAR;
 BEGIN
   IF (~dirty) OR flushing THEN RETURN END;
   flushing:=TRUE; dirty:=FALSE; INC(flushCount); lastFlush:=Kernel.GetTimer();
@@ -444,56 +471,46 @@ BEGIN
   PutByte(1BX); PutByte("P"); PutByte("q");
   PutByte(22X); PutIntRaw(1); PutByte(";"); PutIntRaw(1); PutByte(";");
   PutIntRaw(Width); PutByte(";"); PutIntRaw(Height);
-  WriteSixelPalette;
+  ResetRegisters;
 
   wlim:=Width;
   IF wlim>MaxSixelWidth THEN wlim:=MaxSixelWidth END;
 
   sy:=0;
   WHILE sy<Height DO
-    ci:=0;
-    WHILE ci<16 DO
-      sixelUsed[ci]:=FALSE;
-      sx:=0;
-      WHILE sx<wlim DO
-        sixelLine[ci, sx]:="?";
-        INC(sx)
-      END;
-      INC(ci)
-    END;
-
+    nused:=0;
     sx:=0;
     WHILE sx<wlim DO
       bit:=0;
       WHILE (bit<6) & (sy+bit<Height) DO
         adr:=fbadr + ((sy+bit)*linelength + sx)*bytes;
         SYSTEM.GET( adr, pix);
-        pci:=PixelPaletteIndex(pix);
+        pci:=PixelRegister(pix);
         sixelLine[pci, sx]:=CHR(ORD(sixelLine[pci, sx]) + ASH(1, bit));
-        sixelUsed[pci]:=TRUE;
+        IF ~sixelUsed[pci] THEN sixelUsed[pci]:=TRUE; usedList[nused]:=SHORT(pci); INC(nused) END;
         INC(bit)
       END;
       INC(sx)
     END;
 
-    ci:=0;
-    WHILE ci<16 DO
-      IF sixelUsed[ci] OR (ci=BG) THEN
-        PutByte("#"); PutIntRaw(ci);
-        sx:=0; runLen:=0; lastCh:=0X;
-        WHILE sx<wlim DO
-          ch:=sixelLine[ci, sx];
-          IF (runLen=0) OR (ch=lastCh) THEN
-            lastCh:=ch; INC(runLen)
-          ELSE
-            PutSixelRun(lastCh, runLen); lastCh:=ch; runLen:=1
-          END;
-          INC(sx)
+    i:=0;
+    WHILE i<nused DO  (* only the registers used in this band; their lines are cleared after *)
+      ci:=usedList[i];
+      PutRegister(ci);
+      sx:=0; runLen:=0; lastCh:=0X;
+      WHILE sx<wlim DO
+        ch:=sixelLine[ci, sx]; sixelLine[ci, sx]:="?";
+        IF (runLen=0) OR (ch=lastCh) THEN
+          lastCh:=ch; INC(runLen)
+        ELSE
+          PutSixelRun(lastCh, runLen); lastCh:=ch; runLen:=1
         END;
-        PutSixelRun(lastCh, runLen);
-        PutByte("$")
+        INC(sx)
       END;
-      INC(ci)
+      PutSixelRun(lastCh, runLen);
+      PutByte("$");
+      sixelUsed[ci]:=FALSE;
+      INC(i)
     END;
     PutByte("-");
     INC(sy, 6)
@@ -1890,7 +1907,7 @@ BEGIN
 END GetAuth;
 
 PROCEDURE InitX11*(): LONGINT;
-VAR bdata: ARRAY 64 OF CHAR;
+VAR bdata: ARRAY 64 OF CHAR; ci, cj: LONGINT;
 BEGIN
   (* Terminal/sixel backend.  Kept under the old exported name so
      Input and the boot link do not need to know about X11 vs terminal. *)
@@ -1917,6 +1934,16 @@ BEGIN
   Kernel.GetConfig("SXL_QUIET_MS", bdata);
   quietDelay:=Str2Int(bdata, 100);
   IF quietDelay<0 THEN quietDelay:=0 END;
+  (* polpo: sixel colour registers; xterm needs XTerm*numColorRegisters for more than 16 *)
+  Kernel.GetConfig("SXL_COLORS", bdata);
+  maxRegs:=Str2Int(bdata, MaxRegs);
+  IF maxRegs<2 THEN maxRegs:=2 ELSIF maxRegs>MaxRegs THEN maxRegs:=MaxRegs END;
+  ci:=0;
+  WHILE ci<MaxRegs DO
+    sixelUsed[ci]:=FALSE; cj:=0;
+    WHILE cj<MaxSixelWidth DO sixelLine[ci, cj]:="?"; INC(cj) END;
+    INC(ci)
+  END;
 
   SetColor(BG, 0, 0, 0);
   SetColor(FG, 255, 255, 255);

@@ -4,8 +4,11 @@
 #polpoXTerm*maxGraphicSize: 3000x2000
 #polpoXTerm*sixelScrolling: true
 #polpoXTerm*sixelScrollsRight: true
+#polpoXTerm*numColorRegisters: 256
 
 # then do `xrdb -merge ~/.Xresources`
+# SXL_COLORS sets how many sixel colour registers Oberon uses (2..256, default 256);
+# a VT340 xterm has 16 unless numColorRegisters says more
 
 #xterm -ti vt340 -tn vt340 -geometry 200x70   -xrm 'XTerm*maxGraphicSize: 3000x2000'   -xrm 'XTerm*sixelScrolling: true'   -xrm 'XTerm*sixelScrollsRight: true'   -fa 'monospace' -fs 10
 export OWIDTH=1500
@@ -18,4 +21,5 @@ xterm -name polpo  -ti vt340 -tn vt340 -geometry 200x70 \
   -xrm 'XTerm*maxGraphicSize: 3000x2000' \
   -xrm 'XTerm*sixelScrolling: true' \
   -xrm 'XTerm*sixelScrollsRight: true' \
+  -xrm 'XTerm*numColorRegisters: 256' \
   -fa 'monospace' -fs 10 -e bin/x86/loksh System.Init

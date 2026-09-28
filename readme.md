@@ -94,6 +94,11 @@ This will replace compiled Display.Obj and Input.Obj with the versions that work
 
 After that we suggest to use supplied `run.vt.sh` script that will open a conveniently big xterm and load oberon that would draw itself in it.
 
+Oberon uses up to 256 sixel colour registers, assigned as colours appear on the screen,
+so only colours actually shown cost traffic. `SXL_COLORS=16` (2..256) limits them for
+terminals with fewer registers; colours beyond get the nearest one. xterm emulating a
+VT340 has 16 registers unless `XTerm*numColorRegisters: 256` is set, as `run.vt.sh` does.
+
 The same `bin/x86/loksh` (no need for relinking) will load modules, including Display and Input(but those are different Display and Input now), and the OS will now work in the terminal.
 
 Since Oberon now draws itself in the VT320 capable Unix terminal, you can also run it via ssh.
