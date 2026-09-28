@@ -261,6 +261,7 @@ VAR
 
   bytes, displayFormat, linelength : LONGINT;
   palette: ARRAY 256 OF LONGINT;
+  lastPix, lastIndex: LONGINT; lastValid: BOOLEAN;  (* polpo: the last pixel mapped to its nearest sixel colour *)
 
 (* X11 *)
   cid, pid, gcpid, wid*, iwid, gcid, shmseg: LONGINT;
@@ -374,15 +375,31 @@ END PutIntRaw;
 
 PROCEDURE^ GetColor*(col: Color; VAR red, green, blue: INTEGER);
 
+(* polpo: a pixel that is not one of the 16 sixel colours (inverted selections, true colours)
+   gets the nearest of them, instead of the foreground colour *)
 PROCEDURE PixelPaletteIndex( pix: LONGINT): LONGINT;
-VAR i: LONGINT;
+VAR i, best, d, bestd, p, r, g, b, dr, dg, db: LONGINT; pr, pg, pb: INTEGER;
 BEGIN
   i:=0;
   WHILE i<16 DO
     IF pix=palette[i] THEN RETURN i END;
     INC(i)
   END;
-  IF pix=palette[BG] THEN RETURN BG ELSE RETURN FG END
+  IF lastValid & (pix=lastPix) THEN RETURN lastIndex END;
+  p:=pix MOD 1000000H;
+  r:=ASH( ASH(p, -rmr), 8-rmw) MOD 256;
+  g:=ASH( ASH(p, -gmr), 8-gmw) MOD 256;
+  b:=ASH( ASH(p, -bmr), 8-bmw) MOD 256;
+  best:=FG; bestd:=MAX(LONGINT); i:=0;
+  WHILE i<16 DO
+    GetColor(i, pr, pg, pb);
+    dr:=r-pr; dg:=g-pg; db:=b-pb;
+    d:=dr*dr + dg*dg + db*db;
+    IF d<bestd THEN bestd:=d; best:=i END;
+    INC(i)
+  END;
+  lastPix:=pix; lastIndex:=best; lastValid:=TRUE;
+  RETURN best
 END PixelPaletteIndex;
 
 PROCEDURE WriteSixelPalette;
@@ -561,6 +578,7 @@ BEGIN
   IF col>=0 THEN
     palette[col MOD 256] := ASH( ASH(red, rmw-8), rmr)+ ASH( ASH(green, gmw-8), gmr)+ ASH( ASH(blue, bmw-8), bmr)
   END;
+  lastValid := FALSE
 END SetColor;
 
 (** Retrieve color palette entry or color components of a true color value. 0 <= red, green, blue < 256. *)

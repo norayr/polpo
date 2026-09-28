@@ -11,7 +11,7 @@ System = {
     { !Script.Open System.Text }
   }
   FontScale = 150  {* screen font scale in percent, see System.SetFontScale *}
-  LineSpacing = 150  {* line spacing of text viewers in percent of the font height *}
+  LineSpacing = 100  {* line spacing of text viewers in percent of each line's height *}
   TimeDiff = "+0000"  {* time difference of PC clock to GMT *}
 }
 

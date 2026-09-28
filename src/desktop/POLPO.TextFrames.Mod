@@ -1254,7 +1254,7 @@ END MulDiv;
   PROCEDURE LineSpacing(): LONGINT;
     VAR S: Texts.Scanner; v: LONGINT;
   BEGIN
-    v := 150;
+    v := 100;
     Oberon.OpenScanner(S, "System.LineSpacing");
     IF (S.class = Texts.Int) & (S.i >= 100) & (S.i <= 300) THEN v := S.i END;
     RETURN v

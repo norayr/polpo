@@ -136,8 +136,8 @@ A text asking for `Syntax10.Scn.Fnt` gets the existing font nearest to 10 * scal
 of the same family if possible (at 200% the real Syntax20), else of the Oberon family.
 Texts keep their font names, so documents are stored unchanged. In text viewers each
 line is as high as the largest font on it, so headings get their full size;
-`LineSpacing = 150` in the `System` section (percent of each line's height, default 150)
-sets the spacing of lines.
+`LineSpacing = 100` in the `System` section (percent of each line's height, default 100)
+sets the spacing of lines; 120 or 150 give more room.
 
 How `Oberon.Text` is read, and how your own programs can keep settings there, is
 described in [texts.md](texts.md).
