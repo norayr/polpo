@@ -26,6 +26,7 @@ compiler.Compile /s src/common/POLPO.FATFiles.Mod
 compiler.Compile /s src/cli/shell.Mod
 compiler.Compile /s src/cli/loksh.Mod
 compiler.Compile /s src/cli/cat.Mod
+compiler.Compile /s src/cli/xxs.Mod
 compiler.Compile /s src/cli/bdffont.Mod
 compiler.Compile /s src/cli/grep.Mod
 compiler.Compile /s src/cli/rx.Mod

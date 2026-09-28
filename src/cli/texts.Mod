@@ -8,6 +8,8 @@ CONST
   Char* = Texts0.Char; Object* = Texts0.Object; ElemChar* = 1CX;
   ESC = 1BX;
 
+VAR palette: ARRAY 15 OF LONGINT;  (* RGB of the Oberon colours 0..14 *)
+
 TYPE
   Text* = Texts0.Text;
   Buffer* = Texts0.Buffer;
@@ -179,11 +181,23 @@ BEGIN
   out.Char(CHR(ORD("0") + n MOD 10)); out.Char("m")
 END Attr;
 
-(* Oberon palette: 0-7 are ANSI 30-37, 8-14 bright 90-97, 15 is the default colour *)
-PROCEDURE Color(col: SHORTINT);
+(** the colours 0..15 of the default Oberon palette (share/Default.Pal); FALSE for 15, the
+  text colour, and other numbers *)
+PROCEDURE PaletteRGB*(col: LONGINT; VAR r, g, b: LONGINT): BOOLEAN;
+VAR v: LONGINT;
 BEGIN
-  IF (col >= 0) & (col < 8) THEN Attr(30 + col)
-  ELSIF (col >= 8) & (col < 15) THEN Attr(90 + col - 8)
+  IF (col < 0) OR (col >= 15) THEN RETURN FALSE END;
+  v := palette[col]; r := v DIV 10000H; g := v DIV 100H MOD 100H; b := v MOD 100H;
+  RETURN TRUE
+END PaletteRGB;
+
+(* the colour col as a true colour attribute, ESC [ 38 ; 2 ; r ; g ; b m *)
+PROCEDURE Color(col: SHORTINT);
+VAR r, g, b: LONGINT;
+BEGIN
+  IF PaletteRGB(col, r, g, b) THEN
+    out.Char(ESC); out.String("[38;2;"); out.Int(r, 0); out.Char(";"); out.Int(g, 0); out.Char(";");
+    out.Int(b, 0); out.Char("m")
   END
 END Color;
 
@@ -225,12 +239,13 @@ END ShowFile;
 
 (* Command arguments are words separated by blanks, or "texts with blanks". Unlike the
    Scanner, words may contain any character (file names with "-", numbers) and be long. *)
-PROCEDURE OpenArgs(VAR R: Reader);
+(** open R on the command parameters, for Arg *)
+PROCEDURE OpenArgs*(VAR R: Reader);
 BEGIN OpenReader(R, Oberon.Par.text, Oberon.Par.pos)
 END OpenArgs;
 
 (* the next argument in s; FALSE at the end of the arguments ("~" or the end of the line) or when it is too long *)
-PROCEDURE Arg(VAR R: Reader; VAR s: ARRAY OF CHAR): BOOLEAN;
+PROCEDURE Arg*(VAR R: Reader; VAR s: ARRAY OF CHAR): BOOLEAN;
 VAR ch: CHAR; i: LONGINT; quoted: BOOLEAN;
 BEGIN
   Read(R, ch);
@@ -270,7 +285,7 @@ BEGIN
 END Find;
 
 (* does T contain only characters, no objects that the console cannot store *)
-PROCEDURE OnlyCharacters(T: Text): BOOLEAN;
+PROCEDURE OnlyCharacters*(T: Text): BOOLEAN;
 VAR R: Reader; ch: CHAR;
 BEGIN
   OpenReader(R, T, 0); Read(R, ch);
@@ -294,7 +309,8 @@ BEGIN
 END OpenEdit;
 
 (* store T as name, the old file as name.Bak; a plain text stays plain *)
-PROCEDURE StoreEdit(VAR name: ARRAY OF CHAR; T: Text; plain: BOOLEAN);
+(** store T as the file name, the old file kept as name.Bak; plain: as ASCII with LF line ends *)
+PROCEDURE StoreFile*(VAR name: ARRAY OF CHAR; T: Text; plain: BOOLEAN);
 VAR f: Files.File; W: Files.Rider; R: Reader; ch: CHAR; bak: ARRAY 256 OF CHAR; i, res: INTEGER;
 BEGIN
   f := Files.New(name);
@@ -312,7 +328,7 @@ BEGIN
   bak[i] := "."; bak[i+1] := "B"; bak[i+2] := "a"; bak[i+3] := "k"; bak[i+4] := 0X;
   Files.Rename(name, bak, res);
   Files.Register(f)
-END StoreEdit;
+END StoreFile;
 
 (** texts.Replace file "old" "new" ~ -- replace every occurrence of old by new in the text
   file, "" as new deletes. The new text gets the font and colour of the old. The file is
@@ -338,7 +354,7 @@ BEGIN
       INC(n); pos := Find(T, pos + newlen, old)
     END;
     out.String(name); out.Char(" "); out.Int(n, 0); out.String(" replaced"); out.Ln;
-    IF n > 0 THEN StoreEdit(name, T, plain) END
+    IF n > 0 THEN StoreFile(name, T, plain) END
   END
 END Replace;
 
@@ -364,7 +380,7 @@ BEGIN
       Delete(T, beg, end); INC(n); m := Find(T, beg, pat)
     END;
     out.String(name); out.Char(" "); out.Int(n, 0); out.String(" lines deleted"); out.Ln;
-    IF n > 0 THEN StoreEdit(name, T, plain) END
+    IF n > 0 THEN StoreFile(name, T, plain) END
   END
 END DeleteLines;
 
@@ -384,6 +400,10 @@ PROCEDURE ShowPlain*;
 BEGIN ShowFiles(FALSE) END ShowPlain;
 
 BEGIN
+  palette[0] := 0FFFFFFH; palette[1] := 0FF0000H; palette[2] := 000FF00H; palette[3] := 00000FFH;
+  palette[4] := 0FF00FFH; palette[5] := 0FFFF00H; palette[6] := 000FFFFH; palette[7] := 0AA0000H;
+  palette[8] := 0009A00H; palette[9] := 000009AH; palette[10] := 0A6CBF3H; palette[11] := 0008282H;
+  palette[12] := 08A8A8AH; palette[13] := 0BEBEBEH; palette[14] := 0DFDFDFH;
   IF ~Loaded("Fonts") THEN Objects.Register("Fnt", NewNameOnly) END;
   Texts0.DefaultLibrary := DefaultLibrary;
   Texts0.Update := NIL

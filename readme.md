@@ -65,6 +65,24 @@ texts with blanks are quoted (in the Unix shell as `'"..."'`). The file is store
 text keeps its fonts and colours, a plain file stays plain. Texts with objects (gadgets)
 are left alone.
 
+### xxs, a console editor
+
+`xxs` is a small nano-like editor for the console, the size that fits every terminal:
+
+```
+bin/x86/loksh xxs.Open Oberon.Text     # edit the configuration...
+bin/x86/loksh System.Init              # ...then start the desktop
+bin/x86/loksh xxs.Fit notes.txt        # the same as xxs.Open; new files are created
+```
+
+It edits plain files and Oberon texts: plain files stay plain, Oberon texts keep their
+fonts and colours (shown in the terminal) and new text gets the looks of the character
+before it. The keys are nano's, shown at the bottom: ^O Write Out, ^X Exit, ^K Cut (a
+line; ^K again adds the next), ^U Paste, ^W Where Is, ^C Location, ^G Help, ^A/^E line
+start/end, ^Y/^V page up/down, and the arrows, Home, End, PgUp, PgDn. In the Write Out
+prompt ^T switches between storing as Oberon text and as plain text, so an Oberon text can
+be saved as a plain file. It runs on every port.
+
 ### X11 Oberon
 
 The same `bin/x86/loksh` starts the whole Oberon desktop:

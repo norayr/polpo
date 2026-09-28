@@ -31,6 +31,7 @@ mcompiler.Compile /s src/common/POLPO.FATFiles.Mod
 mcompiler.Compile /s src/cli/shell.Mod
 mcompiler.Compile /s src/cli/loksh.Mod
 mcompiler.Compile /s src/cli/cat.Mod
+mcompiler.Compile /s src/cli/xxs.Mod
 
 # native MIPS compiler and boot linker, so the MIPS system can rebuild itself
 mcompiler.Compile /s src/cli/rop2/ROPM.Mod

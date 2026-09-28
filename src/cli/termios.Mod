@@ -37,23 +37,26 @@ TYPE
   Termios* = RECORD
     iflag*, oflag*, cflag*, lflag*: SET;
     line*: CHAR;
-    cc*: ARRAY 19 OF CHAR
+    cc*: ARRAY 19 OF CHAR;
+    ccMips: ARRAY 12 OF CHAR  (* polpo: MIPS has 23 control characters, room for the kernel *)
   END;
 
 VAR
   savedTerminal: Termios;
   cbreak: BOOLEAN;
+  (* polpo: MIPS numbers ioctls, VMIN/VTIME and IEXTEN differently *)
+  getReq, setReq, winReq, vmin, vtime, iexten: LONGINT;
 
 (* Read terminal settings for file descriptor fd into t.
    Returns 0 on success, negative errno on failure. *)
 PROCEDURE Get*(fd: LONGINT; VAR t: Termios): LONGINT;
-BEGIN RETURN Linux0.IOCtl0(fd, TCGETS, SYSTEM.ADR(t))
+BEGIN RETURN Linux0.IOCtl0(fd, getReq, SYSTEM.ADR(t))
 END Get;
 
 (* Write terminal settings for file descriptor fd from t (takes effect immediately).
    Returns 0 on success, negative errno on failure. *)
 PROCEDURE Set*(fd: LONGINT; VAR t: Termios): LONGINT;
-BEGIN RETURN Linux0.IOCtl0(fd, TCSETS, SYSTEM.ADR(t))
+BEGIN RETURN Linux0.IOCtl0(fd, setReq, SYSTEM.ADR(t))
 END Set;
 
 (* Kernel.Shutdown also invokes this after signals and traps. *)
@@ -77,8 +80,8 @@ BEGIN
     t := saved;
     EXCL(t.lflag, ICANON);  (* no line buffering *)
     EXCL(t.lflag, ECHO);    (* no automatic echo *)
-    t.cc[VMIN]  := 1X;      (* return after every character *)
-    t.cc[VTIME] := 0X;      (* no read timeout *)
+    t.cc[vmin]  := 1X;      (* return after every character *)
+    t.cc[vtime] := 0X;      (* no read timeout *)
     r := Set(fd, t);
     IF r = 0 THEN
       savedTerminal := saved; cbreak := TRUE;
@@ -98,6 +101,30 @@ BEGIN
   RETURN r
 END Leave;
 
+(** polpo: raw mode for full screen programs: no line buffering, echo or signals (^C, ^Z,
+  ^S, ^Q, ^V are keys), Enter is CR, one character at a time *)
+PROCEDURE MakeRaw*(VAR t: Termios);
 BEGIN
-  cbreak := FALSE
+  EXCL(t.lflag, ICANON); EXCL(t.lflag, ECHO); EXCL(t.lflag, ISIG); EXCL(t.lflag, iexten);
+  EXCL(t.iflag, 10 (* IXON *)); EXCL(t.iflag, 8 (* ICRNL *));
+  t.cc[vmin] := 1X; t.cc[vtime] := 0X
+END MakeRaw;
+
+(** polpo: the size of the terminal of fd; FALSE if unknown *)
+PROCEDURE WinSize*(fd: LONGINT; VAR rows, cols: LONGINT): BOOLEAN;
+VAR ws: ARRAY 4 OF INTEGER;
+BEGIN
+  IF (Linux0.IOCtl0(fd, winReq, SYSTEM.ADR(ws[0])) = 0) & (ws[0] > 0) & (ws[1] > 0) THEN
+    rows := ws[0]; cols := ws[1]; RETURN TRUE
+  END;
+  RETURN FALSE
+END WinSize;
+
+BEGIN
+  cbreak := FALSE;
+  IF Linux0.ARCH = "MIPS" THEN
+    getReq := 540DH; setReq := 540EH; winReq := 40087468H; vmin := 4; vtime := 5; iexten := 8
+  ELSE
+    getReq := TCGETS; setReq := TCSETS; winReq := 5413H; vmin := VMIN; vtime := VTIME; iexten := IEXTEN
+  END
 END termios.
