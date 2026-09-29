@@ -401,7 +401,7 @@ END GetTimeOfDay;
 
 PROCEDURE Renameat0*( olddfd, old, newdfd, new, flags: LONGINT): LONGINT;
 BEGIN
-  SYSTEM.PUTREG( NRR, 38);        (* renameat, 38 Syscall nr to R2 *)
+  SYSTEM.PUTREG( NRR, 276);        (* renameat2: RISC-V has no renameat (38) *)
   SYSTEM.CODE( ECALL);
   SYSTEM.CODE( JALR);
 END Renameat0;

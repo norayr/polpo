@@ -78,7 +78,15 @@ bin/x86/loksh portia.Info display-sixel      # dependencies, provides, conflicts
 bin/x86/loksh portia.Files xxs               # the files of a package on this architecture
 bin/x86/loksh portia.Owner obj/x86/Display.Obj
 bin/x86/loksh portia.Check                   # all files here, every import satisfied
+bin/x86/loksh portia.Build xxs               # build xxs and its dependencies
+bin/x86/loksh portia.Build                   # build every installed package (all of polpo)
+bin/x86/loksh portia.Build /arm              # the same for ARM, cross compiled on x86
+qemu-arm bin/arm/loksh portia.Build          # or natively
 ```
+
+`portia.Build` compiles the packages in dependency order, the modules of a package in the
+order of their imports, then links and installs `bin/<arch>/loksh`. It gives the same
+objects as the recipes in `tools/`.
 
 `portia.Record` records the installed packages (in `portia.<arch>`); display-x11 and
 display-sixel are alternatives providing `display`, `portia.Mark display-sixel` records the

@@ -6,6 +6,10 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
    portia.Owner file        the package a file belongs to (sources, objects, data)
    portia.Check             every file present, every import satisfied by the package
                             itself or its dependencies
+   portia.Build [/arch] [name ...]  compile the packages and their dependencies in order
+                            (modules ordered by their imports), then link; without names
+                            every installed package; /arm, /riscv ... for another one
+   portia.Record, portia.Mark name, portia.Unmark name   the record of installed packages
 
    The tree: Portia.Tree in Oberon.Text, or <polpo root>/../arden/. Package descriptions
    are TOML (shared reader with vipak): <tree>/<name>/<name>-<version>.arden. *)
@@ -20,18 +24,18 @@ TYPE
   Name = ARRAY NameLen OF CHAR;
   Buf = POINTER TO ARRAY OF CHAR;
   Item = POINTER TO ItemDesc;
-  ItemDesc = RECORD s: Name; next: Item END;
+  ItemDesc = RECORD s: Name; flags: ARRAY 16 OF CHAR; next: Item END;  (* flags: compiler options of a source *)
 
   Package = POINTER TO PackageDesc;
   PackageDesc = RECORD
     name, version, desc: Name;
-    deps, provides, conflicts, sources, files, modules: Item;  (* modules: names of sources *)
+    deps, provides, conflicts, sources, files, modules, build: Item;  (* modules: names of sources *)
     next: Package
   END;
 
 VAR
   tree: Name;  (* with trailing / *)
-  arch: ARRAY 16 OF CHAR;
+  arch, hostArch: ARRAY 16 OF CHAR;  (* the architecture packages are read for, the one running *)
   packages: Package;
   imports: Item;  (* of the last source parsed *)
   installed: Item; haveDb: BOOLEAN;  (* the installed packages of this architecture, portia.<arch> *)
@@ -74,6 +78,33 @@ BEGIN
     IF w # "" THEN Add(list, w) END
   END
 END AddWords;
+
+(* the sources of a MODULES value: paths, each after its compiler options ("/x path") *)
+PROCEDURE AddSources(VAR list: Item; VAR s: ARRAY OF CHAR);
+VAR words, w, it: Item; flags: ARRAY 16 OF CHAR;
+BEGIN
+  words := NIL; AddWords(words, s); flags := ""; w := words;
+  WHILE w # NIL DO
+    IF w.s[0] = "/" THEN Append(flags, " "); Append(flags, w.s)
+    ELSE Add(list, w.s); it := list; WHILE it.next # NIL DO it := it.next END; COPY(flags, it.flags); flags := ""
+    END;
+    w := w.next
+  END
+END AddSources;
+
+(* the commands of a BUILD value, separated by ";" *)
+PROCEDURE AddCommands(VAR list: Item; VAR s: ARRAY OF CHAR);
+VAR i, j: LONGINT; c: Name;
+BEGIN
+  i := 0;
+  WHILE s[i] # 0X DO
+    WHILE s[i] = " " DO INC(i) END;
+    j := 0; WHILE (s[i] # 0X) & (s[i] # ";") DO IF j < NameLen - 1 THEN c[j] := s[i]; INC(j) END; INC(i) END;
+    WHILE (j > 0) & (c[j-1] = " ") DO DEC(j) END;
+    c[j] := 0X; IF c # "" THEN Add(list, c) END;
+    IF s[i] = ";" THEN INC(i) END
+  END
+END AddCommands;
 
 (* ----- reading Oberon sources: the module name and its imports ----- *)
 
@@ -186,8 +217,9 @@ BEGIN
   NEW(p); COPY(name, p.name); COPY(version, p.version);
   IF ~Field(doc, "PACKAGE", "description", p.desc) THEN p.desc := "" END;
   Keys(doc, "DEPS", p.deps); Keys(doc, "PROVIDES", p.provides); Keys(doc, "CONFLICTS", p.conflicts);
-  IF Field(doc, "MODULES", "all", v) THEN AddWords(p.sources, v) END;
-  IF Field(doc, "MODULES", arch, v) THEN AddWords(p.sources, v) END;
+  IF Field(doc, "MODULES", "all", v) THEN AddSources(p.sources, v) END;
+  IF Field(doc, "MODULES", arch, v) THEN AddSources(p.sources, v) END;
+  IF Field(doc, "BUILD", arch, v) THEN AddCommands(p.build, v) END;
   IF Field(doc, "FILES", "all", v) THEN AddWords(p.files, v) END;
   IF Field(doc, "FILES", arch, v) THEN AddWords(p.files, v) END;
   it := p.sources;
@@ -477,6 +509,146 @@ BEGIN
   out.Int(problems, 0); out.String(" problems ("); out.String(arch); out.String(")"); out.Ln
 END Check;
 
+(* ----- building ----- *)
+
+PROCEDURE Compiler(VAR cmd: ARRAY OF CHAR);  (* for arch *)
+BEGIN
+  IF arch = "x86" THEN COPY("compiler.Compile", cmd) ELSIF arch = "arm" THEN COPY("acompiler.Compile", cmd)
+  ELSIF arch = "riscv" THEN COPY("rvcompiler.Compile", cmd) ELSIF arch = "mips" THEN COPY("mcompiler.Compile", cmd)
+  ELSE COPY("a7compiler.Compile", cmd)
+  END
+END Compiler;
+
+(* run "Module.Command parameters", or "mv from to" *)
+PROCEDURE Run(VAR line: ARRAY OF CHAR): BOOLEAN;
+VAR cmd, a, b: Name; i, j: LONGINT; par: Oberon.ParList; W: Texts.Writer; res: INTEGER;
+BEGIN
+  i := 0; WHILE (line[i] # 0X) & (line[i] # " ") DO cmd[i] := line[i]; INC(i) END; cmd[i] := 0X;
+  WHILE line[i] = " " DO INC(i) END;
+  IF cmd = "mv" THEN
+    j := 0; WHILE (line[i] # 0X) & (line[i] # " ") DO a[j] := line[i]; INC(i); INC(j) END; a[j] := 0X;
+    WHILE line[i] = " " DO INC(i) END;
+    j := 0; WHILE (line[i] # 0X) & (line[i] # " ") DO b[j] := line[i]; INC(i); INC(j) END; b[j] := 0X;
+    F.Rename(a, b, res);
+    IF res # 0 THEN out.String("portia: cannot move "); out.String(a); out.String(" to "); out.String(b); out.Ln; RETURN FALSE END;
+    RETURN TRUE
+  END;
+  NEW(par); NEW(par.text); Texts.Open(par.text, ""); par.pos := 0;
+  Texts.OpenWriter(W); j := i; WHILE line[j] # 0X DO Texts.Write(W, line[j]); INC(j) END;
+  Texts.Append(par.text, W.buf);
+  Oberon.Call(cmd, par, FALSE, res);
+  IF res # 0 THEN out.String("portia: cannot run "); out.String(cmd); out.Ln; RETURN FALSE END;
+  RETURN TRUE
+END Run;
+
+(* the date of a file, 0 if there is none *)
+PROCEDURE Stamp(VAR path: ARRAY OF CHAR): LONGINT;
+VAR f: F.File; t, d: LONGINT;
+BEGIN
+  f := F.Old(path); IF f = NIL THEN RETURN 0 END;
+  F.GetDate(f, t, d); F.ReleaseRead(f); RETURN d * 1000000H + t  (* d:t, only compared *)
+END Stamp;
+
+(* compile the sources of p, each after the modules of p it imports *)
+PROCEDURE BuildPackage(p: Package): BOOLEAN;
+CONST Max = 256;
+VAR src, modn: ARRAY Max OF Item; imp: ARRAY Max OF Item; done: ARRAY Max OF BOOLEAN;
+  n, i, k, left: LONGINT; it: Item; ready, progress: BOOLEAN; mod, cmd, line, obj: Name; before: LONGINT;
+BEGIN
+  n := 0; it := p.sources;
+  WHILE (it # NIL) & (n < Max) DO
+    src[n] := it; IF Header(it.s, mod) THEN END;
+    NEW(modn[n]); COPY(mod, modn[n].s); imp[n] := imports; done[n] := FALSE; INC(n); it := it.next
+  END;
+  Compiler(cmd); left := n;
+  WHILE left > 0 DO
+    progress := FALSE; i := 0;
+    WHILE i < n DO
+      IF ~done[i] THEN
+        ready := TRUE; it := imp[i];
+        WHILE it # NIL DO  (* an import from this package not compiled yet *)
+          k := 0; WHILE k < n DO IF ~done[k] & (k # i) & (modn[k].s = it.s) THEN ready := FALSE END; INC(k) END;
+          it := it.next
+        END;
+        IF ready THEN
+          ObjFile(modn[i].s, FALSE, obj); before := Stamp(obj);
+          COPY(cmd, line); Append(line, " /s"); Append(line, src[i].flags); Append(line, " "); Append(line, src[i].s);
+          IF ~Run(line) THEN RETURN FALSE END;
+          IF (Stamp(obj) = 0) OR (Stamp(obj) = before) THEN
+            out.String("portia: "); out.String(src[i].s); out.String(" did not compile"); out.Ln; RETURN FALSE
+          END;
+          done[i] := TRUE; DEC(left); progress := TRUE
+        END
+      END;
+      INC(i)
+    END;
+    IF ~progress THEN out.String("portia: modules of "); out.String(p.name); out.String(" import each other in a cycle"); out.Ln; RETURN FALSE END
+  END;
+  RETURN TRUE
+END BuildPackage;
+
+(* the packages to build in order, dependencies first; virtual ones: the installed provider *)
+PROCEDURE Order(p: Package; VAR list: Item);
+VAR it: Item; q, r: Package;
+BEGIN
+  IF Has(list, p.name) THEN RETURN END;
+  Add(list, "?");  (* placeholder against cycles, replaced below *)
+  it := p.deps;
+  WHILE it # NIL DO
+    q := Find(it.s);
+    IF q = NIL THEN  (* virtual *)
+      r := packages; q := NIL;
+      WHILE r # NIL DO IF Has(r.provides, it.s) & ((q = NIL) OR IsInstalled(r)) THEN q := r END; r := r.next END
+    END;
+    IF q # NIL THEN Order(q, list) END;
+    it := it.next
+  END;
+  Remove(list, "?"); IF ~Has(list, p.name) THEN Add(list, p.name) END
+END Order;
+
+PROCEDURE SetArch(a: ARRAY OF CHAR);
+BEGIN
+  IF a # arch THEN COPY(a, arch); packages := NIL END
+END SetArch;
+
+(** portia.Build [/arch] [name ...] -- compile the packages and their dependencies in order
+  and run their BUILD commands (linking); without names every installed package *)
+PROCEDURE Build*;
+VAR A: Texts.Reader; name, line: Name; order, names, it, c: Item; p: Package; ok: BOOLEAN; n: LONGINT;
+BEGIN
+  Texts.OpenArgs(A); names := NIL; SetArch(hostArch);
+  WHILE Texts.Arg(A, name) DO
+    IF name[0] = "/" THEN  (* /arch *)
+      n := 0; WHILE name[n+1] # 0X DO name[n] := name[n+1]; INC(n) END; name[n] := 0X; SetArch(name)
+    ELSE Add(names, name)
+    END
+  END;
+  IF ~LoadTree() THEN RETURN END;
+  order := NIL;
+  IF names = NIL THEN
+    p := packages; WHILE p # NIL DO IF IsInstalled(p) THEN Order(p, order) END; p := p.next END
+  ELSE
+    it := names;
+    WHILE it # NIL DO
+      p := Find(it.s);
+      IF p = NIL THEN out.String("portia: no package "); out.String(it.s); out.Ln; RETURN END;
+      Order(p, order); it := it.next
+    END
+  END;
+  out.String("portia: building for "); out.String(arch); out.String(":");
+  it := order; n := 0; WHILE it # NIL DO out.Char(" "); out.String(it.s); INC(n); it := it.next END; out.Ln;
+  it := order; ok := TRUE;
+  WHILE ok & (it # NIL) DO p := Find(it.s); ok := BuildPackage(p); it := it.next END;
+  it := order;
+  WHILE ok & (it # NIL) DO
+    p := Find(it.s); c := p.build;
+    WHILE ok & (c # NIL) DO COPY(c.s, line); ok := Run(line); c := c.next END;
+    it := it.next
+  END;
+  IF ok THEN out.String("portia: built "); out.Int(n, 0); out.String(" packages"); out.Ln END;
+  SetArch(hostArch)
+END Build;
+
 (** portia.Record -- record the packages whose files are here as installed; of alternatives
   sharing files (display-x11, display-sixel) the first; see portia.Mark *)
 PROCEDURE Record*;
@@ -523,10 +695,11 @@ END Unmark;
 PROCEDURE Init;
 VAR S: Texts.Scanner; i: LONGINT;
 BEGIN
-  IF Linux0.ARCH = "X86" THEN arch := "x86" ELSIF Linux0.ARCH = "ARM" THEN arch := "arm"
-  ELSIF Linux0.ARCH = "RISC-V" THEN arch := "riscv" ELSIF Linux0.ARCH = "MIPS" THEN arch := "mips"
-  ELSE arch := "armv7"
+  IF Linux0.ARCH = "X86" THEN hostArch := "x86" ELSIF Linux0.ARCH = "ARM" THEN hostArch := "arm"
+  ELSIF Linux0.ARCH = "RISC-V" THEN hostArch := "riscv" ELSIF Linux0.ARCH = "MIPS" THEN hostArch := "mips"
+  ELSE hostArch := "armv7"
   END;
+  COPY(hostArch, arch);
   Oberon.OpenScanner(S, "Portia.Tree");
   IF S.class IN {Texts.Name, Texts.String} THEN COPY(S.s, tree)
   ELSE Root.Join("../arden/", tree)
