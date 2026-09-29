@@ -88,6 +88,26 @@ qemu-arm bin/arm/loksh portia.Build          # or natively
 order of their imports, then links and installs `bin/<arch>/loksh`. It gives the same
 objects as the recipes in `tools/`.
 
+```
+bin/x86/loksh portia.Install display-sixel   # build it, replacing display-x11 (make sixel)
+bin/x86/loksh portia.Install display-x11     # and back
+bin/x86/loksh portia.Remove console-tools    # delete its objects, if nothing needs it
+```
+
+`portia.Install` builds a package and the dependencies not installed yet, links, and
+records it; installed packages it conflicts with are replaced. `portia.Remove` refuses
+while an installed package needs the package (directly, or as the only provider of
+something like `display`); the sources and data of the base system stay.
+
+Packages have versions (`1.2.10`, `0.3.0-rc1`); a version in `[DEPS]` is the least one
+needed. `portia.Install` builds dependencies only when they are missing or older than
+needed, and leaves a package installed in the tree's version alone. `portia.List` marks
+packages with a newer version in the tree with `u`; `portia.Upgrade [name ...]` builds
+them, what they need, and recompiles the installed packages depending on them (in Oberon
+a changed interface must be recompiled into its importers). `portia.Graph [name] >
+deps.dot` writes the dependencies as a Graphviz graph. The tree can also be set with the
+environment variable `PORTIA_TREE`.
+
 `portia.Record` records the installed packages (in `portia.<arch>`); display-x11 and
 display-sixel are alternatives providing `display`, `portia.Mark display-sixel` records the
 switch after `make sixel`. Installing, removing and fetching packages come next. The

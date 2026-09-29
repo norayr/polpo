@@ -9,12 +9,19 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
    portia.Build [/arch] [name ...]  compile the packages and their dependencies in order
                             (modules ordered by their imports), then link; without names
                             every installed package; /arm, /riscv ... for another one
+   portia.Install [/arch] name ...  build, link and record packages; dependencies only when
+                            missing or older than needed
+   portia.Upgrade [/arch] [name ...]  the installed packages with newer versions in the tree,
+                            and the packages depending on them (recompiled)
+   portia.Remove [/arch] name ...   delete their objects and unrecord them, if nothing needs them
+   portia.Graph [name]      the dependencies as a Graphviz (.dot) graph
    portia.Record, portia.Mark name, portia.Unmark name   the record of installed packages
 
-   The tree: Portia.Tree in Oberon.Text, or <polpo root>/../arden/. Package descriptions
+   The tree: the environment variable PORTIA_TREE, Portia.Tree in Oberon.Text, or
+   <polpo root>/../arden/. Package descriptions
    are TOML (shared reader with vipak): <tree>/<name>/<name>-<version>.arden. *)
 
-IMPORT Linux0, F := Files, Root, Texts := texts, Oberon := Oberon0, TOML, out;
+IMPORT Kernel, Linux0, F := Files, Root, Texts := texts, Oberon := Oberon0, TOML, Versions, out;
 
 CONST
   NameLen = 256;
@@ -24,7 +31,12 @@ TYPE
   Name = ARRAY NameLen OF CHAR;
   Buf = POINTER TO ARRAY OF CHAR;
   Item = POINTER TO ItemDesc;
-  ItemDesc = RECORD s: Name; flags: ARRAY 16 OF CHAR; next: Item END;  (* flags: compiler options of a source *)
+  ItemDesc = RECORD
+    s: Name;
+    v: ARRAY 32 OF CHAR;  (* a version: of a dependency the least needed, of an installed package its own *)
+    flags: ARRAY 16 OF CHAR;  (* compiler options of a source *)
+    next: Item
+  END;
 
   Package = POINTER TO PackageDesc;
   PackageDesc = RECORD
@@ -201,10 +213,16 @@ END Field;
 
 (* the keys of section sec as a list (deps, provides, conflicts) *)
 PROCEDURE Keys(doc: TOML.Doc; sec: ARRAY OF CHAR; VAR list: Item);
-VAR s: TOML.Section; f: TOML.Field;
+VAR s: TOML.Section; f: TOML.Field; it: Item;
 BEGIN
   s := TOML.GetSection(doc, sec);
-  IF s # NIL THEN f := s.first; WHILE f # NIL DO Add(list, f.key); f := f.next END END
+  IF s # NIL THEN
+    f := s.first;
+    WHILE f # NIL DO
+      Add(list, f.key); it := list; WHILE it.next # NIL DO it := it.next END; COPY(f.value, it.v);
+      f := f.next
+    END
+  END
 END Keys;
 
 PROCEDURE Load(VAR name, version: ARRAY OF CHAR): Package;
@@ -296,22 +314,26 @@ BEGIN n := "portia."; Append(n, arch); Root.Join(n, path)
 END DbName;
 
 PROCEDURE LoadDb;
-VAR path: Name; buf: Buf; i, j: LONGINT; name: Name;
+VAR path: Name; buf: Buf; i, j: LONGINT; name, ver: Name; it: Item;
 BEGIN
   installed := NIL; DbName(path); haveDb := ReadFile(path, buf);
   IF haveDb THEN
     i := 0;
     WHILE buf[i] # 0X DO
       j := 0; WHILE buf[i] > " " DO name[j] := buf[i]; INC(i); INC(j) END; name[j] := 0X;
+      WHILE (buf[i] = " ") OR (buf[i] = 09X) DO INC(i) END;
+      j := 0; WHILE buf[i] > " " DO ver[j] := buf[i]; INC(i); INC(j) END; ver[j] := 0X;
       WHILE (buf[i] # 0X) & (buf[i] # 0AX) DO INC(i) END;
       IF buf[i] = 0AX THEN INC(i) END;
-      IF name # "" THEN Add(installed, name) END
+      IF name # "" THEN
+        Add(installed, name); it := installed; WHILE it.next # NIL DO it := it.next END; COPY(ver, it.v)
+      END
     END
   END
 END LoadDb;
 
 PROCEDURE SaveDb;
-VAR path: Name; f: F.File; R: F.Rider; it: Item; p: Package; i: LONGINT;
+VAR path: Name; f: F.File; R: F.Rider; it: Item; i: LONGINT;
 
   PROCEDURE W(s: ARRAY OF CHAR);
   BEGIN i := 0; WHILE s[i] # 0X DO F.Write(R, s[i]); INC(i) END
@@ -322,13 +344,13 @@ BEGIN
   IF f = NIL THEN out.String("portia: cannot write "); out.String(path); out.Ln; RETURN END;
   F.Set(R, f, 0); it := installed;
   WHILE it # NIL DO
-    p := Find(it.s); W(it.s); W(" "); IF p # NIL THEN W(p.version) END; F.Write(R, 0AX);
+    W(it.s); W(" "); W(it.v); F.Write(R, 0AX);
     it := it.next
   END;
   F.Register(f); haveDb := TRUE
 END SaveDb;
 
-PROCEDURE Remove(VAR list: Item; s: ARRAY OF CHAR);
+PROCEDURE Drop(VAR list: Item; s: ARRAY OF CHAR);
 VAR p: Item;
 BEGIN
   IF list # NIL THEN
@@ -336,7 +358,25 @@ BEGIN
     ELSE p := list; WHILE (p.next # NIL) & (p.next.s # s) DO p := p.next END; IF p.next # NIL THEN p.next := p.next.next END
     END
   END
-END Remove;
+END Drop;
+
+(* record name as installed in version v *)
+PROCEDURE SetInstalled(name, v: ARRAY OF CHAR);
+VAR it: Item;
+BEGIN
+  it := installed; WHILE (it # NIL) & (it.s # name) DO it := it.next END;
+  IF it = NIL THEN Add(installed, name); it := installed; WHILE it.next # NIL DO it := it.next END END;
+  COPY(v, it.v)
+END SetInstalled;
+
+(* the installed version of p; FALSE if it is not recorded *)
+PROCEDURE InstVer(p: Package; VAR v: ARRAY OF CHAR): BOOLEAN;
+VAR it: Item;
+BEGIN
+  it := installed; WHILE (it # NIL) & (it.s # p.name) DO it := it.next END;
+  IF it = NIL THEN v[0] := 0X; RETURN FALSE END;
+  COPY(it.v, v); RETURN TRUE
+END InstVer;
 
 (* installed: in the record, or without a record, all its files here *)
 PROCEDURE IsInstalled(p: Package): BOOLEAN;
@@ -359,17 +399,24 @@ BEGIN
   END
 END ListItems;
 
-(** portia.List -- the packages of the tree; i: installed here *)
+(** portia.List -- the packages of the tree; i: installed here, u: a newer version in the tree *)
 PROCEDURE List*;
-VAR p: Package; n: LONGINT;
+VAR p: Package; n: LONGINT; v: ARRAY 32 OF CHAR;
 BEGIN
   IF ~LoadTree() THEN RETURN END;
   p := packages;
   WHILE p # NIL DO
-    IF IsInstalled(p) THEN out.String("i ") ELSE out.String("  ") END;
+    IF ~IsInstalled(p) THEN out.String("  ")
+    ELSIF haveDb & InstVer(p, v) & ~Versions.AtLeast(v, p.version) THEN out.String("u ")  (* upgradable *)
+    ELSE out.String("i ")
+    END;
     out.String(p.name); n := 0; WHILE p.name[n] # 0X DO INC(n) END;
     WHILE n < 24 DO out.Char(" "); INC(n) END;
-    out.String(p.version); out.String("  "); out.String(p.desc); out.Ln;
+    IF haveDb & InstVer(p, v) & (Versions.Compare(v, p.version) # 0) THEN
+      out.String(v); out.String(" -> "); out.String(p.version)
+    ELSE out.String(p.version)
+    END;
+    out.String("  "); out.String(p.desc); out.Ln;
     p := p.next
   END
 END List;
@@ -473,8 +520,10 @@ BEGIN
 END Provided;
 
 (** portia.Check -- every file present and every import satisfied, on this architecture *)
+PROCEDURE ^Resolve(VAR name: ARRAY OF CHAR): Package;
+
 PROCEDURE Check*;
-VAR p: Package; it, im, set: Item; path, mod: Name; problems: LONGINT;
+VAR p, q: Package; it, im, set: Item; path, mod: Name; problems: LONGINT; v: ARRAY 32 OF CHAR;
 BEGIN
   IF ~LoadTree() THEN RETURN END;
   problems := 0; p := packages;
@@ -483,6 +532,17 @@ BEGIN
     it := p.files;
     WHILE it # NIL DO
       IF ~Exists(it.s) THEN out.String(p.name); out.String(": missing "); out.String(it.s); out.Ln; INC(problems) END;
+      it := it.next
+    END;
+    it := p.deps;
+    WHILE it # NIL DO
+      q := Resolve(it.s);
+      IF q = NIL THEN out.String(p.name); out.String(": needs "); out.String(it.s); out.String(", not in the tree"); out.Ln; INC(problems)
+      ELSIF ~IsInstalled(q) THEN out.String(p.name); out.String(": needs "); out.String(it.s); out.String(", not installed"); out.Ln; INC(problems)
+      ELSIF haveDb & InstVer(q, v) & (it.v # "") & ~Versions.AtLeast(v, it.v) THEN
+        out.String(p.name); out.String(": needs "); out.String(q.name); out.String(" "); out.String(it.v);
+        out.String(", installed is "); out.String(v); out.Ln; INC(problems)
+      END;
       it := it.next
     END;
     set := NIL; Closure(p, set);
@@ -510,6 +570,13 @@ BEGIN
 END Check;
 
 (* ----- building ----- *)
+
+(* path as it is found: in the current directory, else in the polpo root *)
+PROCEDURE Local(VAR path: ARRAY OF CHAR);
+VAR full: Name;
+BEGIN
+  IF ~Root.Exists(path) THEN Root.Join(path, full); IF Root.Exists(full) THEN COPY(full, path) END END
+END Local;
 
 PROCEDURE Compiler(VAR cmd: ARRAY OF CHAR);  (* for arch *)
 BEGIN
@@ -553,7 +620,7 @@ END Stamp;
 PROCEDURE BuildPackage(p: Package): BOOLEAN;
 CONST Max = 256;
 VAR src, modn: ARRAY Max OF Item; imp: ARRAY Max OF Item; done: ARRAY Max OF BOOLEAN;
-  n, i, k, left: LONGINT; it: Item; ready, progress: BOOLEAN; mod, cmd, line, obj: Name; before: LONGINT;
+  n, i, k, left: LONGINT; it: Item; ready, progress, had: BOOLEAN; mod, cmd, line, obj, old: Name; res: INTEGER;
 BEGIN
   n := 0; it := p.sources;
   WHILE (it # NIL) & (n < Max) DO
@@ -571,12 +638,15 @@ BEGIN
           it := it.next
         END;
         IF ready THEN
-          ObjFile(modn[i].s, FALSE, obj); before := Stamp(obj);
+          (* the old object aside: a new one must appear; back if the compilation fails *)
+          ObjFile(modn[i].s, FALSE, obj); Local(obj); COPY(obj, old); Append(old, ".old");
+          had := Root.Exists(obj); IF had THEN F.Rename(obj, old, res) END;
           COPY(cmd, line); Append(line, " /s"); Append(line, src[i].flags); Append(line, " "); Append(line, src[i].s);
-          IF ~Run(line) THEN RETURN FALSE END;
-          IF (Stamp(obj) = 0) OR (Stamp(obj) = before) THEN
+          IF ~Run(line) OR ~Root.Exists(obj) THEN
+            IF had THEN F.Rename(old, obj, res) END;
             out.String("portia: "); out.String(src[i].s); out.String(" did not compile"); out.Ln; RETURN FALSE
           END;
+          IF had THEN F.Delete(old, res) END;
           done[i] := TRUE; DEC(left); progress := TRUE
         END
       END;
@@ -603,7 +673,7 @@ BEGIN
     IF q # NIL THEN Order(q, list) END;
     it := it.next
   END;
-  Remove(list, "?"); IF ~Has(list, p.name) THEN Add(list, p.name) END
+  Drop(list, "?"); IF ~Has(list, p.name) THEN Add(list, p.name) END
 END Order;
 
 PROCEDURE SetArch(a: ARRAY OF CHAR);
@@ -611,63 +681,33 @@ BEGIN
   IF a # arch THEN COPY(a, arch); packages := NIL END
 END SetArch;
 
-(** portia.Build [/arch] [name ...] -- compile the packages and their dependencies in order
-  and run their BUILD commands (linking); without names every installed package *)
-PROCEDURE Build*;
-VAR A: Texts.Reader; name, line: Name; order, names, it, c: Item; p: Package; ok: BOOLEAN; n: LONGINT;
-BEGIN
-  Texts.OpenArgs(A); names := NIL; SetArch(hostArch);
-  WHILE Texts.Arg(A, name) DO
-    IF name[0] = "/" THEN  (* /arch *)
-      n := 0; WHILE name[n+1] # 0X DO name[n] := name[n+1]; INC(n) END; name[n] := 0X; SetArch(name)
-    ELSE Add(names, name)
-    END
-  END;
-  IF ~LoadTree() THEN RETURN END;
-  order := NIL;
-  IF names = NIL THEN
-    p := packages; WHILE p # NIL DO IF IsInstalled(p) THEN Order(p, order) END; p := p.next END
-  ELSE
-    it := names;
-    WHILE it # NIL DO
-      p := Find(it.s);
-      IF p = NIL THEN out.String("portia: no package "); out.String(it.s); out.Ln; RETURN END;
-      Order(p, order); it := it.next
-    END
-  END;
-  out.String("portia: building for "); out.String(arch); out.String(":");
-  it := order; n := 0; WHILE it # NIL DO out.Char(" "); out.String(it.s); INC(n); it := it.next END; out.Ln;
-  it := order; ok := TRUE;
-  WHILE ok & (it # NIL) DO p := Find(it.s); ok := BuildPackage(p); it := it.next END;
-  it := order;
-  WHILE ok & (it # NIL) DO
-    p := Find(it.s); c := p.build;
-    WHILE ok & (c # NIL) DO COPY(c.s, line); ok := Run(line); c := c.next END;
-    it := it.next
-  END;
-  IF ok THEN out.String("portia: built "); out.Int(n, 0); out.String(" packages"); out.Ln END;
-  SetArch(hostArch)
-END Build;
-
 (** portia.Record -- record the packages whose files are here as installed; of alternatives
   sharing files (display-x11, display-sixel) the first; see portia.Mark *)
-PROCEDURE Record*;
-VAR p, q: Package; it: Item; skip: BOOLEAN;
+(* the record from the files present; of alternatives the first *)
+PROCEDURE RecordAll(verbose: BOOLEAN);
+VAR p: Package; it: Item; skip: BOOLEAN;
 BEGIN
-  IF ~LoadTree() THEN RETURN END;
   installed := NIL; p := packages;
   WHILE p # NIL DO
     IF Installed(p) THEN
       skip := FALSE; it := p.conflicts;
       WHILE it # NIL DO IF Has(installed, it.s) THEN skip := TRUE END; it := it.next END;
       IF skip THEN
-        out.String("not recorded "); out.String(p.name); out.String(", it conflicts with a recorded package (portia.Mark "); out.String(p.name); out.String(" switches)"); out.Ln
-      ELSE Add(installed, p.name)
+        IF verbose THEN
+          out.String("not recorded "); out.String(p.name); out.String(", it conflicts with a recorded package (portia.Mark "); out.String(p.name); out.String(" switches)"); out.Ln
+        END
+      ELSE SetInstalled(p.name, p.version)
       END
     END;
     p := p.next
   END;
-  SaveDb; q := NIL; List
+  SaveDb
+END RecordAll;
+
+PROCEDURE Record*;
+BEGIN
+  IF ~LoadTree() THEN RETURN END;
+  RecordAll(TRUE); List
 END Record;
 
 (** portia.Mark name -- record the package as installed; its conflicts are unmarked *)
@@ -678,8 +718,8 @@ BEGIN
   IF ~LoadTree() THEN RETURN END;
   p := Find(name);
   IF p = NIL THEN out.String("portia: no package "); out.String(name); out.Ln; RETURN END;
-  it := p.conflicts; WHILE it # NIL DO Remove(installed, it.s); it := it.next END;
-  IF ~Has(installed, name) THEN Add(installed, name) END;
+  it := p.conflicts; WHILE it # NIL DO Drop(installed, it.s); it := it.next END;
+  SetInstalled(name, p.version);
   SaveDb; out.String(name); out.String(" marked installed"); out.Ln
 END Mark;
 
@@ -689,8 +729,327 @@ VAR name: Name;
 BEGIN
   IF ~Arg(name) THEN out.String("usage: portia.Unmark name"); out.Ln; RETURN END;
   IF ~LoadTree() THEN RETURN END;
-  Remove(installed, name); SaveDb; out.String(name); out.String(" unmarked"); out.Ln
+  Drop(installed, name); SaveDb; out.String(name); out.String(" unmarked"); out.Ln
 END Unmark;
+
+(* ----- installing and removing ----- *)
+
+(* delete the objects of the modules of p that no other installed package has *)
+PROCEDURE DeleteObjects(p: Package);
+VAR it: Item; q: Package; shared: BOOLEAN; path, full: Name; res: INTEGER; i: INTEGER;
+BEGIN
+  it := p.modules;
+  WHILE it # NIL DO
+    shared := FALSE; q := packages;
+    WHILE q # NIL DO IF (q # p) & IsInstalled(q) & Has(q.modules, it.s) THEN shared := TRUE END; q := q.next END;
+    IF ~shared THEN
+      i := 0;
+      WHILE i < 2 DO
+        ObjFile(it.s, i = 1, path);
+        IF Root.Exists(path) THEN F.Delete(path, res)
+        ELSE Root.Join(path, full); IF Root.Exists(full) THEN F.Delete(full, res) END
+        END;
+        INC(i)
+      END
+    END;
+    it := it.next
+  END
+END DeleteObjects;
+
+(* the installed packages that need p: depend on it, or on something only p provides *)
+PROCEDURE Needers(p: Package; VAR list: Item);
+VAR q, r: Package; it: Item; other: BOOLEAN;
+BEGIN
+  q := packages;
+  WHILE q # NIL DO
+    IF (q # p) & IsInstalled(q) THEN
+      it := q.deps;
+      WHILE it # NIL DO
+        IF it.s = p.name THEN Add(list, q.name)
+        ELSIF Has(p.provides, it.s) THEN
+          other := FALSE; r := packages;
+          WHILE r # NIL DO IF (r # p) & IsInstalled(r) & Has(r.provides, it.s) THEN other := TRUE END; r := r.next END;
+          IF ~other THEN Add(list, q.name) END
+        END;
+        it := it.next
+      END
+    END;
+    q := q.next
+  END
+END Needers;
+
+(* the arguments: /arch and package names *)
+PROCEDURE Args(VAR names: Item);
+VAR A: Texts.Reader; name: Name; n: LONGINT;
+BEGIN
+  Texts.OpenArgs(A); names := NIL; SetArch(hostArch);
+  WHILE Texts.Arg(A, name) DO
+    IF name[0] = "/" THEN
+      n := 0; WHILE name[n+1] # 0X DO name[n] := name[n+1]; INC(n) END; name[n] := 0X; SetArch(name)
+    ELSE Add(names, name)
+    END
+  END
+END Args;
+
+(* ----- versions: what to build ----- *)
+
+(* the package for a dependency: itself, or for a virtual one the installed provider (else
+   the first one in the tree) *)
+PROCEDURE Resolve(VAR name: ARRAY OF CHAR): Package;
+VAR q, r: Package;
+BEGIN
+  q := Find(name);
+  IF q = NIL THEN
+    r := packages;
+    WHILE r # NIL DO IF Has(r.provides, name) & ((q = NIL) OR IsInstalled(r)) THEN q := r END; r := r.next END
+  END;
+  RETURN q
+END Resolve;
+
+(* add to set the dependencies of p that are missing or older than p needs, recursively *)
+PROCEDURE AddNeeded(p: Package; VAR set: Item): BOOLEAN;
+VAR it: Item; q: Package; v: ARRAY 32 OF CHAR;
+BEGIN
+  it := p.deps;
+  WHILE it # NIL DO
+    q := Resolve(it.s);
+    IF q = NIL THEN out.String("portia: "); out.String(p.name); out.String(" needs "); out.String(it.s); out.String(", not in the tree"); out.Ln; RETURN FALSE END;
+    IF (it.v # "") & ~Versions.AtLeast(q.version, it.v) THEN
+      out.String("portia: "); out.String(p.name); out.String(" needs "); out.String(q.name); out.String(" "); out.String(it.v);
+      out.String(", the tree has "); out.String(q.version); out.Ln; RETURN FALSE
+    END;
+    IF ~Has(set, q.name) & (~IsInstalled(q) OR haveDb & InstVer(q, v) & (it.v # "") & ~Versions.AtLeast(v, it.v)) THEN
+      Add(set, q.name);
+      IF ~AddNeeded(q, set) THEN RETURN FALSE END
+    END;
+    it := it.next
+  END;
+  RETURN TRUE
+END AddNeeded;
+
+(* p's installed version differs from the one to build: its interface may change *)
+PROCEDURE Changes(p: Package): BOOLEAN;
+VAR v: ARRAY 32 OF CHAR;
+BEGIN RETURN IsInstalled(p) & InstVer(p, v) & (Versions.Compare(v, p.version) # 0)
+END Changes;
+
+(* add the installed packages depending on changed packages of set: recompiled, so they do
+   not import an old interface; transitively *)
+PROCEDURE AddDependents(VAR set: Item);
+VAR changed, it, d: Item; q, r: Package; more: BOOLEAN;
+BEGIN
+  changed := NIL; it := set;
+  WHILE it # NIL DO q := Find(it.s); IF (q # NIL) & Changes(q) THEN Add(changed, q.name) END; it := it.next END;
+  REPEAT
+    more := FALSE; q := packages;
+    WHILE q # NIL DO
+      IF IsInstalled(q) & ~Has(set, q.name) THEN
+        d := q.deps;
+        WHILE d # NIL DO
+          r := Resolve(d.s);
+          IF (r # NIL) & Has(changed, r.name) & ~Has(set, q.name) THEN
+            Add(set, q.name); Add(changed, q.name); more := TRUE;
+            out.String("portia: "); out.String(q.name); out.String(" is recompiled for the new "); out.String(r.name); out.Ln
+          END;
+          d := d.next
+        END
+      END;
+      q := q.next
+    END
+  UNTIL ~more
+END AddDependents;
+
+(* build the packages of set in dependency order, link, record them; replace conflicts *)
+PROCEDURE Execute(set: Item; verb: ARRAY OF CHAR);
+VAR order, it, c, cf: Item; p, q: Package; ok: BOOLEAN; line: Name; n: LONGINT;
+BEGIN
+  order := NIL; it := set; WHILE it # NIL DO p := Find(it.s); Order(p, order); it := it.next END;
+  out.String("portia: "); out.String(verb); out.String(" for "); out.String(arch); out.String(":");
+  it := order; n := 0;
+  WHILE it # NIL DO
+    IF Has(set, it.s) THEN out.Char(" "); out.String(it.s); p := Find(it.s); out.Char(" "); out.String(p.version); INC(n) END;
+    it := it.next
+  END;
+  out.Ln;
+  ok := TRUE; it := order;
+  WHILE ok & (it # NIL) DO
+    p := Find(it.s);
+    IF Has(set, p.name) THEN
+      ok := BuildPackage(p);
+      c := p.build; WHILE ok & (c # NIL) DO COPY(c.s, line); ok := Run(line); c := c.next END;
+      IF ok THEN
+        SetInstalled(p.name, p.version);  (* first: its objects are not deleted below *)
+        cf := p.conflicts;
+        WHILE cf # NIL DO
+          q := Find(cf.s);
+          IF (q # NIL) & IsInstalled(q) THEN
+            Drop(installed, q.name); DeleteObjects(q); out.String("portia: replaced "); out.String(q.name); out.Ln
+          END;
+          cf := cf.next
+        END;
+        SaveDb
+      END
+    END;
+    it := it.next
+  END;
+  IF ok THEN out.String("portia: done, "); out.Int(n, 0); out.String(" packages") ELSE out.String("portia: stopped") END; out.Ln
+END Execute;
+
+PROCEDURE Start(VAR names: Item): BOOLEAN;  (* arguments, the tree and the record *)
+BEGIN
+  Args(names);
+  IF ~LoadTree() THEN SetArch(hostArch); RETURN FALSE END;
+  IF ~haveDb THEN RecordAll(FALSE) END;
+  RETURN TRUE
+END Start;
+
+(** portia.Install [/arch] name ... -- install the packages: build them, and the dependencies
+  that are missing or older than needed; packages already installed in the tree's version
+  are left alone. Installed packages they conflict with are replaced *)
+PROCEDURE Install*;
+VAR names, set, it: Item; p: Package; v: ARRAY 32 OF CHAR; ok: BOOLEAN;
+BEGIN
+  IF ~Start(names) THEN RETURN END;
+  IF names = NIL THEN out.String("usage: portia.Install [/arch] name ..."); out.Ln; SetArch(hostArch); RETURN END;
+  set := NIL; ok := TRUE; it := names;
+  WHILE ok & (it # NIL) DO
+    p := Find(it.s);
+    IF p = NIL THEN out.String("portia: no package "); out.String(it.s); out.Ln; ok := FALSE
+    ELSIF IsInstalled(p) & haveDb & InstVer(p, v) & Versions.AtLeast(v, p.version) THEN
+      out.String("portia: "); out.String(p.name); out.Char(" "); out.String(v); out.String(" is installed"); out.Ln
+    ELSE Add(set, p.name); ok := AddNeeded(p, set)
+    END;
+    it := it.next
+  END;
+  IF ok & (set # NIL) THEN AddDependents(set); Execute(set, "installing") END;
+  SetArch(hostArch)
+END Install;
+
+(** portia.Upgrade [/arch] [name ...] -- build the installed packages with a newer version in
+  the tree (all, or the named ones), what they need, and the packages depending on them *)
+PROCEDURE Upgrade*;
+VAR names, set: Item; p: Package; v: ARRAY 32 OF CHAR; ok: BOOLEAN;
+BEGIN
+  IF ~Start(names) THEN RETURN END;
+  set := NIL; ok := TRUE; p := packages;
+  WHILE ok & (p # NIL) DO
+    IF IsInstalled(p) & ((names = NIL) OR Has(names, p.name)) & InstVer(p, v) & ~Versions.AtLeast(v, p.version) THEN
+      Add(set, p.name); ok := AddNeeded(p, set)
+    END;
+    p := p.next
+  END;
+  IF ~ok THEN
+  ELSIF set = NIL THEN out.String("portia: everything is up to date"); out.Ln
+  ELSE AddDependents(set); Execute(set, "upgrading")
+  END;
+  SetArch(hostArch)
+END Upgrade;
+
+(** portia.Build [/arch] [name ...] -- rebuild the packages (and dependencies missing or too
+  old); without names every installed package *)
+PROCEDURE Build*;
+VAR names, set, it: Item; p: Package; ok: BOOLEAN;
+BEGIN
+  IF ~Start(names) THEN RETURN END;
+  set := NIL; ok := TRUE;
+  IF names = NIL THEN
+    p := packages; WHILE p # NIL DO IF IsInstalled(p) THEN Add(set, p.name) END; p := p.next END
+  ELSE
+    it := names;
+    WHILE ok & (it # NIL) DO
+      p := Find(it.s);
+      IF p = NIL THEN out.String("portia: no package "); out.String(it.s); out.Ln; ok := FALSE
+      ELSE Add(set, p.name); ok := AddNeeded(p, set)
+      END;
+      it := it.next
+    END
+  END;
+  IF ok THEN AddDependents(set); Execute(set, "building") END;
+  SetArch(hostArch)
+END Build;
+
+(* ----- the dependency graph ----- *)
+
+(** portia.Graph [name] -- the dependencies as a Graphviz graph on the standard output, of
+  one package and what it needs, or of the whole tree; installed packages filled, virtual
+  ones (display) dashed with their providers:  loksh portia.Graph > deps.dot; dot -Tsvg ... *)
+PROCEDURE Graph*;
+VAR name: Name; set, it, d, virt: Item; p, q: Package;
+
+  PROCEDURE Q(s: ARRAY OF CHAR);
+  BEGIN out.Char(22X); out.String(s); out.Char(22X)
+  END Q;
+
+BEGIN
+  IF ~LoadTree() THEN RETURN END;
+  set := NIL;
+  IF Arg(name) THEN
+    p := Find(name);
+    IF p = NIL THEN out.String("portia: no package "); out.String(name); out.Ln; RETURN END;
+    Closure(p, set)
+  ELSE p := packages; WHILE p # NIL DO Add(set, p.name); p := p.next END
+  END;
+  out.String("digraph arden {"); out.Ln;
+  out.String("  rankdir=LR; node [shape=box, fontname=sans];"); out.Ln;
+  virt := NIL; it := set;
+  WHILE it # NIL DO
+    p := Find(it.s);
+    IF p # NIL THEN
+      out.String("  "); Q(p.name); out.String(" [label="); out.Char(22X); out.String(p.name); out.String("\n"); out.String(p.version); out.Char(22X);
+      IF IsInstalled(p) THEN out.String(", style=filled, fillcolor=lightgrey") END;
+      out.String("];"); out.Ln;
+      d := p.deps;
+      WHILE d # NIL DO
+        out.String("  "); Q(p.name); out.String(" -> "); Q(d.s);
+        IF d.v # "" THEN out.String(" [label="); Q(d.v); out.String("]") END;
+        out.String(";"); out.Ln;
+        IF (Find(d.s) = NIL) & ~Has(virt, d.s) THEN Add(virt, d.s) END;
+        d := d.next
+      END
+    END;
+    it := it.next
+  END;
+  it := virt;
+  WHILE it # NIL DO  (* a virtual package and its providers *)
+    out.String("  "); Q(it.s); out.String(" [style=dashed, shape=ellipse];"); out.Ln;
+    q := packages;
+    WHILE q # NIL DO
+      IF Has(q.provides, it.s) THEN out.String("  "); Q(q.name); out.String(" -> "); Q(it.s); out.String(" [style=dashed, dir=back];"); out.Ln END;
+      q := q.next
+    END;
+    it := it.next
+  END;
+  out.String("}"); out.Ln
+END Graph;
+
+(** portia.Remove [/arch] name ... -- delete the objects of the packages and unrecord them;
+  not while installed packages need them. Sources and data of the base system stay *)
+PROCEDURE RemoveOne(name: ARRAY OF CHAR);
+VAR p: Package; needers, it: Item;
+BEGIN
+  p := Find(name);
+  IF p = NIL THEN out.String("portia: no package "); out.String(name); out.Ln; RETURN END;
+  IF ~IsInstalled(p) THEN out.String(name); out.String(" is not installed"); out.Ln; RETURN END;
+  needers := NIL; Needers(p, needers);
+  IF needers # NIL THEN
+    out.String("portia: "); out.String(name); out.String(" is needed by");
+    it := needers; WHILE it # NIL DO out.Char(" "); out.String(it.s); it := it.next END; out.Ln;
+    RETURN
+  END;
+  DeleteObjects(p); Drop(installed, name); SaveDb;
+  out.String("portia: removed "); out.String(name); out.Ln
+END RemoveOne;
+
+PROCEDURE Remove*;
+VAR names, it: Item;
+BEGIN
+  Args(names);
+  IF names = NIL THEN out.String("usage: portia.Remove [/arch] name ..."); out.Ln; RETURN END;
+  IF ~LoadTree() THEN RETURN END;
+  IF ~haveDb THEN RecordAll(FALSE) END;
+  it := names; WHILE it # NIL DO RemoveOne(it.s); it := it.next END;
+  SetArch(hostArch)
+END Remove;
 
 PROCEDURE Init;
 VAR S: Texts.Scanner; i: LONGINT;
@@ -700,9 +1059,12 @@ BEGIN
   ELSE hostArch := "armv7"
   END;
   COPY(hostArch, arch);
-  Oberon.OpenScanner(S, "Portia.Tree");
-  IF S.class IN {Texts.Name, Texts.String} THEN COPY(S.s, tree)
-  ELSE Root.Join("../arden/", tree)
+  Kernel.GetConfig("PORTIA_TREE", tree);  (* first: Oberon.Text strings have at most 63 characters *)
+  IF tree = "" THEN
+    Oberon.OpenScanner(S, "Portia.Tree");
+    IF S.class IN {Texts.Name, Texts.String} THEN COPY(S.s, tree)
+    ELSE Root.Join("../arden/", tree)
+    END
   END;
   i := 0; WHILE tree[i] # 0X DO INC(i) END;
   IF (i > 0) & (tree[i-1] # "/") THEN Append(tree, "/") END;
