@@ -12,8 +12,9 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
    Install, Upgrade, Build and Remove show what they will do and ask; /y does not ask.
    portia.Install [/arch] name ...  build, link and record packages; dependencies only when
                             missing or older than needed
-   portia.Upgrade [/arch] [name ...]  the installed packages with newer versions in the tree,
-                            and the packages depending on them (recompiled)
+   portia.Upgrade [/arch] [name ...]  the installed packages with newer versions in the tree
+   When the interface of a module changes (its symbol file), the installed packages
+   depending on its package are recompiled, and so on.
    portia.Remove [/arch] name ...   delete their objects and unrecord them, if nothing needs them
    portia.Graph [name]      the dependencies as a Graphviz (.dot) graph
    portia.Record, portia.Mark name, portia.Unmark name   the record of installed packages
@@ -618,13 +619,36 @@ BEGIN
   F.GetDate(f, t, d); F.ReleaseRead(f); RETURN d * 1000000H + t  (* d:t, only compared *)
 END Stamp;
 
-(* compile the sources of p, each after the modules of p it imports *)
-PROCEDURE BuildPackage(p: Package): BOOLEAN;
+(* a checksum of the interface of module mod: its symbol file, on x86 the symbol part of the
+   object file (tag, format, size, then the symbols); len 0 if there is none *)
+PROCEDURE SymKey(VAR mod: ARRAY OF CHAR; VAR len, s1, s2: LONGINT);
+VAR path: Name; f: F.File; R: F.Rider; c, tag: CHAR; n: LONGINT;
+BEGIN
+  len := 0; s1 := 0; s2 := 0;
+  ObjFile(mod, arch # "x86", path); Local(path);
+  f := F.Old(path); IF f = NIL THEN RETURN END;
+  F.Set(R, f, 0);
+  IF arch = "x86" THEN
+    F.Read(R, tag); F.Read(R, c);
+    IF tag # 0BBX THEN F.ReleaseRead(f); len := -1; RETURN END;
+    F.ReadNum(R, n)
+  ELSE n := F.Length(f)
+  END;
+  WHILE (len < n) & ~R.eof DO
+    F.Read(R, c); s1 := (s1 * 31 + ORD(c)) MOD 999983; s2 := (s2 + ORD(c) * (len MOD 97 + 1)) MOD 1000003; INC(len)
+  END;
+  F.ReleaseRead(f)
+END SymKey;
+
+(* compile the sources of p, each after the modules of p it imports; changed: the interface
+   of a module that existed before changed, its importers must be recompiled *)
+PROCEDURE BuildPackage(p: Package; VAR changed: BOOLEAN): BOOLEAN;
 CONST Max = 256;
 VAR src, modn: ARRAY Max OF Item; imp: ARRAY Max OF Item; done: ARRAY Max OF BOOLEAN;
   n, i, k, left: LONGINT; it: Item; ready, progress, had: BOOLEAN; mod, cmd, line, obj, old: Name; res: INTEGER;
+  l0, a0, b0, l1, a1, b1: LONGINT;
 BEGIN
-  n := 0; it := p.sources;
+  changed := FALSE; n := 0; it := p.sources;
   WHILE (it # NIL) & (n < Max) DO
     src[n] := it; IF Header(it.s, mod) THEN END;
     NEW(modn[n]); COPY(mod, modn[n].s); imp[n] := imports; done[n] := FALSE; INC(n); it := it.next
@@ -641,6 +665,7 @@ BEGIN
         END;
         IF ready THEN
           (* the old object aside: a new one must appear; back if the compilation fails *)
+          SymKey(modn[i].s, l0, a0, b0);
           ObjFile(modn[i].s, FALSE, obj); Local(obj); COPY(obj, old); Append(old, ".old");
           had := Root.Exists(obj); IF had THEN F.Rename(obj, old, res) END;
           COPY(cmd, line); Append(line, " /s"); Append(line, src[i].flags); Append(line, " "); Append(line, src[i].s);
@@ -649,6 +674,10 @@ BEGIN
             out.String("portia: "); out.String(src[i].s); out.String(" did not compile"); out.Ln; RETURN FALSE
           END;
           IF had THEN F.Delete(old, res) END;
+          SymKey(modn[i].s, l1, a1, b1);
+          IF (l0 > 0) & ((l1 # l0) OR (a1 # a0) OR (b1 # b0)) THEN
+            out.String("portia: the interface of "); out.String(modn[i].s); out.String(" changed"); out.Ln; changed := TRUE
+          END;
           done[i] := TRUE; DEC(left); progress := TRUE
         END
       END;
@@ -853,43 +882,12 @@ BEGIN
   RETURN TRUE
 END AddNeeded;
 
-(* p's installed version differs from the one to build: its interface may change *)
-PROCEDURE Changes(p: Package): BOOLEAN;
-VAR v: ARRAY 32 OF CHAR;
-BEGIN RETURN IsInstalled(p) & InstVer(p, v) & (Versions.Compare(v, p.version) # 0)
-END Changes;
-
-(* add the installed packages depending on changed packages of set: recompiled, so they do
-   not import an old interface; transitively *)
-PROCEDURE AddDependents(VAR set: Item);
-VAR changed, it, d: Item; q, r: Package; more: BOOLEAN;
-BEGIN
-  changed := NIL; it := set;
-  WHILE it # NIL DO q := Find(it.s); IF (q # NIL) & Changes(q) THEN Add(changed, q.name) END; it := it.next END;
-  REPEAT
-    more := FALSE; q := packages;
-    WHILE q # NIL DO
-      IF IsInstalled(q) & ~Has(set, q.name) THEN
-        d := q.deps;
-        WHILE d # NIL DO
-          r := Resolve(d.s);
-          IF (r # NIL) & Has(changed, r.name) & ~Has(set, q.name) THEN
-            Add(set, q.name); Add(changed, q.name); more := TRUE;
-            it := set; WHILE it.next # NIL DO it := it.next END; COPY(r.name, it.v)  (* the reason *)
-          END;
-          d := d.next
-        END
-      END;
-      q := q.next
-    END
-  UNTIL ~more
-END AddDependents;
-
 (* build the packages of set in dependency order, link, record them; replace conflicts *)
 PROCEDURE Execute(set: Item; verb: ARRAY OF CHAR);
-VAR order, it, c, cf: Item; p, q: Package; ok: BOOLEAN; line: Name; n: LONGINT; v: ARRAY 32 OF CHAR;
+VAR order, it, c, cf, d: Item; p, q, r: Package; ok, changed: BOOLEAN; line: Name; n: LONGINT; v: ARRAY 32 OF CHAR;
 BEGIN
   order := NIL; it := set; WHILE it # NIL DO p := Find(it.s); Order(p, order); it := it.next END;
+  q := packages; WHILE q # NIL DO IF IsInstalled(q) THEN Order(q, order) END; q := q.next END;  (* for importers *)
   out.String("portia: "); out.String(verb); out.String(" for "); out.String(arch); out.String(":"); out.Ln;
   it := order; n := 0;
   WHILE it # NIL DO
@@ -905,12 +903,31 @@ BEGIN
     END;
     it := it.next
   END;
+  out.String("  (installed packages importing an interface that changes are recompiled too)"); out.Ln;
   IF ~Confirm(n, verb) THEN out.String("portia: nothing done"); out.Ln; RETURN END;
+  n := 0;
   ok := TRUE; it := order;
   WHILE ok & (it # NIL) DO
     p := Find(it.s);
     IF Has(set, p.name) THEN
-      ok := BuildPackage(p);
+      ok := BuildPackage(p, changed); INC(n);
+      IF ok & changed THEN  (* its importers are recompiled when their turn comes *)
+        q := packages;
+        WHILE q # NIL DO
+          IF IsInstalled(q) & ~Has(set, q.name) THEN
+            d := q.deps;
+            WHILE d # NIL DO
+              r := Resolve(d.s);
+              IF (r = p) & ~Has(set, q.name) THEN
+                Add(set, q.name); out.String("portia: recompiling "); out.String(q.name);
+                out.String(" for the new interface of "); out.String(p.name); out.Ln
+              END;
+              d := d.next
+            END
+          END;
+          q := q.next
+        END
+      END;
       c := p.build; WHILE ok & (c # NIL) DO COPY(c.s, line); ok := Run(line); c := c.next END;
       IF ok THEN
         SetInstalled(p.name, p.version);  (* first: its objects are not deleted below *)
@@ -956,7 +973,7 @@ BEGIN
     END;
     it := it.next
   END;
-  IF ok & (set # NIL) THEN AddDependents(set); Execute(set, "installing") END;
+  IF ok & (set # NIL) THEN Execute(set, "installing") END;
   SetArch(hostArch)
 END Install;
 
@@ -975,7 +992,7 @@ BEGIN
   END;
   IF ~ok THEN
   ELSIF set = NIL THEN out.String("portia: everything is up to date"); out.Ln
-  ELSE AddDependents(set); Execute(set, "upgrading")
+  ELSE Execute(set, "upgrading")
   END;
   SetArch(hostArch)
 END Upgrade;
@@ -999,7 +1016,7 @@ BEGIN
       it := it.next
     END
   END;
-  IF ok THEN AddDependents(set); Execute(set, "building") END;
+  IF ok THEN Execute(set, "building") END;
   SetArch(hostArch)
 END Build;
 

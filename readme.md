@@ -107,8 +107,10 @@ Packages have versions (`1.2.10`, `0.3.0-rc1`); a version in `[DEPS]` is the lea
 needed. `portia.Install` builds dependencies only when they are missing or older than
 needed, and leaves a package installed in the tree's version alone. `portia.List` marks
 packages with a newer version in the tree with `u`; `portia.Upgrade [name ...]` builds
-them, what they need, and recompiles the installed packages depending on them (in Oberon
-a changed interface must be recompiled into its importers). `portia.Graph [name] >
+them and what they need. When the interface of a module changes (portia compares its symbol
+file before and after compiling; on x86 the symbol part of the object file), the installed
+packages depending on its package are recompiled, and so on: in Oberon a changed interface
+must be recompiled into its importers. `portia.Graph [name] >
 deps.dot` writes the dependencies as a Graphviz graph. The tree can also be set with the
 environment variable `PORTIA_TREE`.
 
