@@ -33,6 +33,8 @@ acompiler.Compile /s src/cli/shell.Mod
 acompiler.Compile /s src/cli/loksh.Mod
 acompiler.Compile /s src/cli/cat.Mod
 acompiler.Compile /s src/cli/xxs.Mod
+acompiler.Compile /s src/cli/TOML.Mod
+acompiler.Compile /s src/cli/portia.Mod
 
 # native ARM compiler and boot linker, so the ARM system can rebuild itself
 acompiler.Compile /s src/cli/arm/OBM.Mod

@@ -32,6 +32,8 @@ rvcompiler.Compile /s src/cli/shell.Mod
 rvcompiler.Compile /s src/cli/loksh.Mod
 rvcompiler.Compile /s src/cli/cat.Mod
 rvcompiler.Compile /s src/cli/xxs.Mod
+rvcompiler.Compile /s src/cli/TOML.Mod
+rvcompiler.Compile /s src/cli/portia.Mod
 
 # native RISC-V compiler and boot linker, so the RISC-V system can rebuild itself
 rvcompiler.Compile /s src/cli/rop2/ROPM.Mod

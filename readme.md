@@ -65,6 +65,27 @@ texts with blanks are quoted (in the Unix shell as `'"..."'`). The file is store
 text keeps its fonts and colours, a plain file stays plain. Texts with objects (gadgets)
 are left alone.
 
+### portia, the package manager
+
+polpo is described as packages in the tree arden (next to polpo, `../arden`, or
+`Portia.Tree` in `Oberon.Text`): core, console, xxs, the compilers, the desktop, the
+display variants and more, each with its modules per architecture, data files and
+dependencies. portia reads it:
+
+```
+bin/x86/loksh portia.List                    # the packages; i: installed
+bin/x86/loksh portia.Info display-sixel      # dependencies, provides, conflicts, modules
+bin/x86/loksh portia.Files xxs               # the files of a package on this architecture
+bin/x86/loksh portia.Owner obj/x86/Display.Obj
+bin/x86/loksh portia.Check                   # all files here, every import satisfied
+```
+
+`portia.Record` records the installed packages (in `portia.<arch>`); display-x11 and
+display-sixel are alternatives providing `display`, `portia.Mark display-sixel` records the
+switch after `make sixel`. Installing, removing and fetching packages come next. The
+package descriptions use vipak's TOML format, and the TOML reader (`src/cli/TOML.Mod`) is
+the same module vipak uses.
+
 ### xxs, a console editor
 
 `xxs` is a small nano-like editor for the console, the size that fits every terminal:
