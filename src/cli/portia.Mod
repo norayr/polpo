@@ -9,6 +9,7 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
    portia.Build [/arch] [name ...]  compile the packages and their dependencies in order
                             (modules ordered by their imports), then link; without names
                             every installed package; /arm, /riscv ... for another one
+   Install, Upgrade, Build and Remove show what they will do and ask; /y does not ask.
    portia.Install [/arch] name ...  build, link and record packages; dependencies only when
                             missing or older than needed
    portia.Upgrade [/arch] [name ...]  the installed packages with newer versions in the tree,
@@ -21,7 +22,7 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
    <polpo root>/../arden/. Package descriptions
    are TOML (shared reader with vipak): <tree>/<name>/<name>-<version>.arden. *)
 
-IMPORT Kernel, Linux0, F := Files, Root, Texts := texts, Oberon := Oberon0, TOML, Versions, out;
+IMPORT Kernel, Linux0, SYSTEM, F := Files, Root, Texts := texts, Oberon := Oberon0, TOML, Versions, termios, out;
 
 CONST
   NameLen = 256;
@@ -51,6 +52,7 @@ VAR
   packages: Package;
   imports: Item;  (* of the last source parsed *)
   installed: Item; haveDb: BOOLEAN;  (* the installed packages of this architecture, portia.<arch> *)
+  assumeYes: BOOLEAN;  (* /y: do not ask *)
 
 (* ----- strings and lists ----- *)
 
@@ -782,14 +784,38 @@ END Needers;
 PROCEDURE Args(VAR names: Item);
 VAR A: Texts.Reader; name: Name; n: LONGINT;
 BEGIN
-  Texts.OpenArgs(A); names := NIL; SetArch(hostArch);
+  Texts.OpenArgs(A); names := NIL; SetArch(hostArch); assumeYes := FALSE;
   WHILE Texts.Arg(A, name) DO
-    IF name[0] = "/" THEN
+    IF (name = "/y") OR (name = "/Y") THEN assumeYes := TRUE
+    ELSIF name[0] = "/" THEN
       n := 0; WHILE name[n+1] # 0X DO name[n] := name[n+1]; INC(n) END; name[n] := 0X; SetArch(name)
     ELSE Add(names, name)
     END
   END
 END Args;
+
+(* ask to proceed with n packages; /y does not ask, without a terminal /y is needed *)
+PROCEDURE Confirm(n: LONGINT; what: ARRAY OF CHAR): BOOLEAN;
+VAR t: termios.Termios; c, answer: CHAR; r: LONGINT; echo: BOOLEAN;
+BEGIN
+  IF assumeYes THEN RETURN TRUE END;
+  IF termios.Get(0, t) # 0 THEN
+    out.String("portia: not asking without a terminal; add /y to proceed"); out.Ln; RETURN FALSE
+  END;
+  echo := ~(termios.ECHO IN t.lflag);  (* the shell may have turned echo off *)
+  out.String("Proceed "); out.String(what); out.String(" "); out.Int(n, 0);
+  IF n = 1 THEN out.String(" package? [Y/n] ") ELSE out.String(" packages? [Y/n] ") END;
+  answer := 0X;
+  LOOP
+    r := Linux0.Read0(0, SYSTEM.ADR(c), 1);
+    IF r <= 0 THEN answer := "n"; EXIT END;
+    IF (c = 0DX) OR (c = 0AX) THEN EXIT END;
+    IF c = 3X THEN answer := "n"; EXIT END;  (* ^C *)
+    IF c > " " THEN IF answer = 0X THEN answer := c END; IF echo THEN out.Char(c) END END
+  END;
+  IF echo THEN out.Ln END;
+  RETURN (answer = 0X) OR (answer = "y") OR (answer = "Y")
+END Confirm;
 
 (* ----- versions: what to build ----- *)
 
@@ -849,7 +875,7 @@ BEGIN
           r := Resolve(d.s);
           IF (r # NIL) & Has(changed, r.name) & ~Has(set, q.name) THEN
             Add(set, q.name); Add(changed, q.name); more := TRUE;
-            out.String("portia: "); out.String(q.name); out.String(" is recompiled for the new "); out.String(r.name); out.Ln
+            it := set; WHILE it.next # NIL DO it := it.next END; COPY(r.name, it.v)  (* the reason *)
           END;
           d := d.next
         END
@@ -861,16 +887,25 @@ END AddDependents;
 
 (* build the packages of set in dependency order, link, record them; replace conflicts *)
 PROCEDURE Execute(set: Item; verb: ARRAY OF CHAR);
-VAR order, it, c, cf: Item; p, q: Package; ok: BOOLEAN; line: Name; n: LONGINT;
+VAR order, it, c, cf: Item; p, q: Package; ok: BOOLEAN; line: Name; n: LONGINT; v: ARRAY 32 OF CHAR;
 BEGIN
   order := NIL; it := set; WHILE it # NIL DO p := Find(it.s); Order(p, order); it := it.next END;
-  out.String("portia: "); out.String(verb); out.String(" for "); out.String(arch); out.String(":");
+  out.String("portia: "); out.String(verb); out.String(" for "); out.String(arch); out.String(":"); out.Ln;
   it := order; n := 0;
   WHILE it # NIL DO
-    IF Has(set, it.s) THEN out.Char(" "); out.String(it.s); p := Find(it.s); out.Char(" "); out.String(p.version); INC(n) END;
+    IF Has(set, it.s) THEN
+      p := Find(it.s); out.String("  "); out.String(p.name); out.Char(" "); out.String(p.version); out.String("  ");
+      c := set; WHILE c.s # p.name DO c := c.next END;
+      IF c.v # "" THEN out.String("recompiled for the new "); out.String(c.v)
+      ELSIF ~IsInstalled(p) THEN out.String("new")
+      ELSIF InstVer(p, v) & (Versions.Compare(v, p.version) # 0) THEN out.String("upgrade from "); out.String(v)
+      ELSE out.String("rebuilt")
+      END;
+      out.Ln; INC(n)
+    END;
     it := it.next
   END;
-  out.Ln;
+  IF ~Confirm(n, verb) THEN out.String("portia: nothing done"); out.Ln; RETURN END;
   ok := TRUE; it := order;
   WHILE ok & (it # NIL) DO
     p := Find(it.s);
@@ -1024,30 +1059,38 @@ END Graph;
 
 (** portia.Remove [/arch] name ... -- delete the objects of the packages and unrecord them;
   not while installed packages need them. Sources and data of the base system stay *)
-PROCEDURE RemoveOne(name: ARRAY OF CHAR);
-VAR p: Package; needers, it: Item;
-BEGIN
-  p := Find(name);
-  IF p = NIL THEN out.String("portia: no package "); out.String(name); out.Ln; RETURN END;
-  IF ~IsInstalled(p) THEN out.String(name); out.String(" is not installed"); out.Ln; RETURN END;
-  needers := NIL; Needers(p, needers);
-  IF needers # NIL THEN
-    out.String("portia: "); out.String(name); out.String(" is needed by");
-    it := needers; WHILE it # NIL DO out.Char(" "); out.String(it.s); it := it.next END; out.Ln;
-    RETURN
-  END;
-  DeleteObjects(p); Drop(installed, name); SaveDb;
-  out.String("portia: removed "); out.String(name); out.Ln
-END RemoveOne;
-
 PROCEDURE Remove*;
-VAR names, it: Item;
+VAR names, it, needers, n2: Item; p: Package; ok: BOOLEAN; n: LONGINT;
 BEGIN
   Args(names);
-  IF names = NIL THEN out.String("usage: portia.Remove [/arch] name ..."); out.Ln; RETURN END;
-  IF ~LoadTree() THEN RETURN END;
+  IF names = NIL THEN out.String("usage: portia.Remove [/arch] [/y] name ..."); out.Ln; SetArch(hostArch); RETURN END;
+  IF ~LoadTree() THEN SetArch(hostArch); RETURN END;
   IF ~haveDb THEN RecordAll(FALSE) END;
-  it := names; WHILE it # NIL DO RemoveOne(it.s); it := it.next END;
+  ok := TRUE; it := names;
+  WHILE it # NIL DO
+    p := Find(it.s);
+    IF p = NIL THEN out.String("portia: no package "); out.String(it.s); out.Ln; ok := FALSE
+    ELSIF ~IsInstalled(p) THEN out.String("portia: "); out.String(it.s); out.String(" is not installed"); out.Ln; ok := FALSE
+    ELSE
+      needers := NIL; Needers(p, needers);
+      n2 := needers; WHILE n2 # NIL DO IF Has(names, n2.s) THEN Drop(needers, n2.s); n2 := needers ELSE n2 := n2.next END END;
+      IF needers # NIL THEN  (* needed by a package that stays *)
+        out.String("portia: "); out.String(p.name); out.String(" is needed by");
+        n2 := needers; WHILE n2 # NIL DO out.Char(" "); out.String(n2.s); n2 := n2.next END; out.Ln; ok := FALSE
+      END
+    END;
+    it := it.next
+  END;
+  IF ok THEN
+    out.String("portia: removing for "); out.String(arch); out.String(" (objects; sources and data of the base system stay):"); out.Ln;
+    n := 0; it := names; WHILE it # NIL DO p := Find(it.s); out.String("  "); out.String(p.name); out.Char(" "); out.String(p.version); out.Ln; INC(n); it := it.next END;
+    IF Confirm(n, "removing") THEN
+      it := names;
+      WHILE it # NIL DO p := Find(it.s); DeleteObjects(p); Drop(installed, p.name); it := it.next END;
+      SaveDb; out.String("portia: removed "); out.Int(n, 0); IF n = 1 THEN out.String(" package") ELSE out.String(" packages") END; out.Ln
+    ELSE out.String("portia: nothing done"); out.Ln
+    END
+  END;
   SetArch(hostArch)
 END Remove;
 

@@ -99,6 +99,10 @@ records it; installed packages it conflicts with are replaced. `portia.Remove` r
 while an installed package needs the package (directly, or as the only provider of
 something like `display`); the sources and data of the base system stay.
 
+Install, Upgrade, Build and Remove first list what they will do (new, upgrade from, rebuilt,
+recompiled for a changed dependency) and ask; answering n changes nothing. `/y` does not
+ask, for scripts; without a terminal portia needs `/y`.
+
 Packages have versions (`1.2.10`, `0.3.0-rc1`); a version in `[DEPS]` is the least one
 needed. `portia.Install` builds dependencies only when they are missing or older than
 needed, and leaves a package installed in the tree's version alone. `portia.List` marks
