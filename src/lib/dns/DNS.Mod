@@ -23,6 +23,7 @@ VAR
   server: ARRAY MaxServers OF Sockets.Address;
   sport: ARRAY MaxServers OF LONGINT;
   nservers: LONGINT;
+  first: LONGINT;  (* the server that answered last: asked first *)
   loaded: BOOLEAN;
   file: ARRAY 16384 OF CHAR;  (* /etc/hosts, /etc/resolv.conf *)
   flen: LONGINT;
@@ -99,7 +100,7 @@ END AddServer;
 PROCEDURE LoadServers;
 VAR i: LONGINT; w: ARRAY 64 OF CHAR;
 BEGIN
-  nservers := 0;
+  nservers := 0; first := 0;
   Kernel.GetConfig("DNS_SERVER", w);
   IF w # "" THEN AddServer(w) END;
   IF ReadFile("/etc/resolv.conf") THEN
@@ -239,15 +240,15 @@ END Answer;
 
 (* ask the servers for the records of type t; the result code *)
 PROCEDURE Ask(VAR name: ARRAY OF CHAR; t: LONGINT; VAR a: ARRAY OF Sockets.Address; VAR n: LONGINT): LONGINT;
-VAR q, m: ARRAY MaxMsg OF CHAR; qlen, len, id, try, k, r, fport, got: LONGINT;
+VAR q, m: ARRAY MaxMsg OF CHAR; qlen, len, id, try, j, k, r, fport, got: LONGINT;
   s: Sockets.Socket; from: Sockets.Address;
 BEGIN
   IF ~loaded THEN LoadServers END;
   try := 0;
   WHILE try < Tries DO
-    k := 0;
-    WHILE k < nservers DO
-      id := NewId();
+    j := 0;
+    WHILE j < nservers DO
+      k := (first + j) MOD nservers; id := NewId();
       IF ~Query(name, id, t, q, qlen) THEN RETURN BadName END;
       s := Sockets.OpenUDP(server[k].family, 0);
       IF s # NIL THEN
@@ -259,7 +260,7 @@ BEGIN
             IF len < 0 THEN got := 4
             ELSIF (len >= 12) & (Get16(m, 0) = id) & (ORD(m[2]) >= 80H) & (fport = sport[k]) THEN
               r := Answer(m, len, t, a, n);
-              IF r # NoAnswer THEN Sockets.Close(s); RETURN r END;
+              IF r # NoAnswer THEN Sockets.Close(s); first := k; RETURN r END;
               got := 4
             ELSE INC(got)
             END
@@ -267,7 +268,7 @@ BEGIN
         END;
         Sockets.Close(s)
       END;
-      INC(k)
+      INC(j)
     END;
     INC(try)
   END;
