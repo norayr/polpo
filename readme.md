@@ -119,8 +119,8 @@ environment variable `PORTIA_TREE`.
 `portia.Record` records the installed packages (in `portia.<arch>`); display-x11 and
 display-sixel are alternatives providing `display`, `portia.Mark display-sixel` records the
 switch after `make sixel`. Installing, removing and fetching packages come next. The
-package descriptions use vipak's TOML format, and the TOML reader (`src/cli/TOML.Mod`) is
-the same module vipak uses.
+package descriptions are TOML. Libraries the base system needs live in `src/lib/<name>/`
+(`toml`, `versions`), each a package of the `lib` category.
 
 ### xxs, a console editor
 

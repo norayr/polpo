@@ -32,8 +32,8 @@ mcompiler.Compile /s src/cli/shell.Mod
 mcompiler.Compile /s src/cli/loksh.Mod
 mcompiler.Compile /s src/cli/cat.Mod
 mcompiler.Compile /s src/cli/xxs.Mod
-mcompiler.Compile /s src/cli/TOML.Mod
-mcompiler.Compile /s src/cli/Versions.Mod
+mcompiler.Compile /s src/lib/toml/TOML.Mod
+mcompiler.Compile /s src/lib/versions/Versions.Mod
 mcompiler.Compile /s src/cli/portia.Mod
 
 # native MIPS compiler and boot linker, so the MIPS system can rebuild itself

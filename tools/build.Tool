@@ -27,8 +27,8 @@ compiler.Compile /s src/cli/shell.Mod
 compiler.Compile /s src/cli/loksh.Mod
 compiler.Compile /s src/cli/cat.Mod
 compiler.Compile /s src/cli/xxs.Mod
-compiler.Compile /s src/cli/TOML.Mod
-compiler.Compile /s src/cli/Versions.Mod
+compiler.Compile /s src/lib/toml/TOML.Mod
+compiler.Compile /s src/lib/versions/Versions.Mod
 compiler.Compile /s src/cli/portia.Mod
 compiler.Compile /s src/cli/bdffont.Mod
 compiler.Compile /s src/cli/grep.Mod
