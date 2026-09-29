@@ -28,7 +28,7 @@ TYPE
 
 VAR
   res*: LONGINT;  (** the error of the last procedure that did not get a socket *)
-  sockStream, sockDgram, solSocket, soReuseAddr: LONGINT;  (* MIPS numbers them differently *)
+  sockStream, sockDgram, solSocket, soReuseAddr, soRcvTimeo, soSndTimeo: LONGINT;  (* MIPS numbers them differently *)
 
 (* ----- addresses ----- *)
 
@@ -323,6 +323,17 @@ BEGIN
   FromSockAddr(sa, a, port); RETURN TRUE
 END LocalAddress;
 
+(** receiving and sending wait at most ms milliseconds (0: without end); then they fail
+  with -11 (EAGAIN) *)
+PROCEDURE SetTimeout*(s: Socket; ms: LONGINT);
+VAR tv: ARRAY 2 OF LONGINT; r: LONGINT;
+BEGIN
+  tv[0] := ms DIV 1000; tv[1] := ms MOD 1000 * 1000;  (* struct timeval: seconds, microseconds *)
+  r := Linux0.SetSockOpt0(s.fd, solSocket, soRcvTimeo, SYSTEM.ADR(tv[0]), 8);
+  IF r >= 0 THEN r := Linux0.SetSockOpt0(s.fd, solSocket, soSndTimeo, SYSTEM.ADR(tv[0]), 8) END;
+  IF r < 0 THEN s.res := r END
+END SetTimeout;
+
 (* ----- UDP ----- *)
 
 (** a UDP socket of family; port 0: any local port; NIL if it fails (res) *)
@@ -362,7 +373,8 @@ END ReceiveFrom;
 
 BEGIN
   res := 0;
-  IF Linux0.ARCH = "MIPS" THEN sockStream := 2; sockDgram := 1; solSocket := 0FFFFH; soReuseAddr := 4
-  ELSE sockStream := 1; sockDgram := 2; solSocket := 1; soReuseAddr := 2
+  IF Linux0.ARCH = "MIPS" THEN
+    sockStream := 2; sockDgram := 1; solSocket := 0FFFFH; soReuseAddr := 4; soRcvTimeo := 1006H; soSndTimeo := 1005H
+  ELSE sockStream := 1; sockDgram := 2; solSocket := 1; soReuseAddr := 2; soRcvTimeo := 20; soSndTimeo := 21
   END
 END Sockets.

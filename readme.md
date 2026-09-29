@@ -125,12 +125,16 @@ package descriptions are TOML. Libraries the base system needs live in `src/lib/
 ### Network
 
 `Sockets` (`src/lib/sockets`) is TCP and UDP over IPv4 and IPv6, on every port, with the
-socket system calls of `Linux0`. `net` is a set of minimal tools on top of it (names need
-DNS, which comes next, so for now addresses):
+socket system calls of `Linux0`. `DNS` (`src/lib/dns`) turns host names into addresses:
+`/etc/hosts` first, then A and AAAA queries over UDP to the `nameserver`s of
+`/etc/resolv.conf` (or 1.1.1.1), waiting 2 seconds for each; the environment variable
+`DNS_SERVER` (an address, optionally `#port`) is asked first. `net` is a set of minimal tools
+on top of them; a host is a name or an address, and its addresses are tried in turn:
 
 ```
-bin/x86/loksh net.Get 192.0.2.1 80 /index.html   # HTTP/1.0 GET
-bin/x86/loksh net.Get ::1 8080 /
+bin/x86/loksh net.Get example.com 80 /           # HTTP/1.0 GET
+bin/x86/loksh net.Get ::1 8080 /index.html
+bin/x86/loksh net.Lookup example.com localhost   # the addresses of names
 bin/x86/loksh net.Send 192.0.2.1 7 hello        # send a text, print the answer
 bin/x86/loksh net.Echo 7000 3                   # echo 3 connections, IPv6 and IPv4
 bin/x86/loksh net.UDP ::1 5353 hello            # a datagram, the answer and its sender

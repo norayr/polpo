@@ -31,6 +31,7 @@ compiler.Compile /s src/lib/toml/TOML.Mod
 compiler.Compile /s src/lib/versions/Versions.Mod
 compiler.Compile /s src/cli/portia.Mod
 compiler.Compile /s src/lib/sockets/Sockets.Mod
+compiler.Compile /s src/lib/dns/DNS.Mod
 compiler.Compile /s src/cli/net.Mod
 compiler.Compile /s src/cli/bdffont.Mod
 compiler.Compile /s src/cli/grep.Mod

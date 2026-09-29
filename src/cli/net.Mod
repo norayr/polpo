@@ -1,12 +1,16 @@
-MODULE net;  (** minimal network tools over Sockets; addresses only until DNS *)
+MODULE net;  (** minimal network tools over Sockets and DNS *)
 
-(* net.Get address port [path]    HTTP/1.0 GET, prints the answer
-   net.Send address port text     sends text, prints what comes back
+(* net.Get host port [path]       HTTP/1.0 GET, prints the answer
+   net.Send host port text        sends text, prints what comes back
    net.Echo port [count]          echoes count connections (default 1), IPv6 and IPv4
-   net.UDP address port text      sends a datagram, prints the answer
-   net.Address text ...           the addresses in normal form *)
+   net.UDP host port text         sends a datagram, prints the answer
+   net.Lookup name ...            the addresses of the names
+   net.Address text ...           the addresses in normal form
+   A host is a name or an IPv4 or IPv6 address; its addresses are tried in turn. *)
 
-IMPORT Texts := texts, Sockets, out;
+IMPORT Texts := texts, Sockets, DNS, out;
+
+CONST MaxAddrs = 8;
 
 PROCEDURE Number(VAR s: ARRAY OF CHAR; VAR n: LONGINT): BOOLEAN;
 VAR i: LONGINT;
@@ -33,25 +37,47 @@ BEGIN
   IF n < 0 THEN Error("receive", n) END
 END Print;
 
-(* the address and port arguments *)
-PROCEDURE Target(VAR A: Texts.Reader; VAR a: Sockets.Address; VAR port: LONGINT): BOOLEAN;
+PROCEDURE LookupError(VAR name: ARRAY OF CHAR);
+BEGIN
+  out.String("net: "); out.String(name);
+  IF DNS.res = DNS.NotFound THEN out.String(" not found")
+  ELSIF DNS.res = DNS.BadName THEN out.String(" is not a host name")
+  ELSE out.String(": no answer from the name servers")
+  END;
+  out.Ln
+END LookupError;
+
+(* the host and port arguments: the host's addresses in a[0..n), the host in host *)
+PROCEDURE Target(VAR A: Texts.Reader; VAR host: ARRAY OF CHAR; VAR a: ARRAY OF Sockets.Address; VAR n, port: LONGINT): BOOLEAN;
 VAR s: ARRAY 256 OF CHAR;
 BEGIN
-  IF ~Texts.Arg(A, s) OR ~Sockets.ParseAddress(s, a) THEN out.String("net: an IPv4 or IPv6 address expected"); out.Ln; RETURN FALSE END;
+  IF ~Texts.Arg(A, host) THEN out.String("net: a host expected"); out.Ln; RETURN FALSE END;
   IF ~Texts.Arg(A, s) OR ~Number(s, port) THEN out.String("net: a port expected"); out.Ln; RETURN FALSE END;
+  DNS.Lookup(host, DNS.Any, a, n);
+  IF n = 0 THEN LookupError(host); RETURN FALSE END;
   RETURN TRUE
 END Target;
 
-(** net.Get address port [path] -- HTTP/1.0 GET *)
+(* a connection to one of a[0..n) *)
+PROCEDURE Open(VAR a: ARRAY OF Sockets.Address; n, port: LONGINT): Sockets.Socket;
+VAR i: LONGINT; s: Sockets.Socket;
+BEGIN
+  i := 0; s := NIL;
+  WHILE (s = NIL) & (i < n) DO s := Sockets.Connect(a[i], port); INC(i) END;
+  IF s = NIL THEN Error("connect", Sockets.res) END;
+  RETURN s
+END Open;
+
+(** net.Get host port [path] -- HTTP/1.0 GET *)
 PROCEDURE Get*;
-VAR A: Texts.Reader; a: Sockets.Address; port, r: LONGINT; path, host, req: ARRAY 512 OF CHAR; s: Sockets.Socket; i, j: LONGINT;
+VAR A: Texts.Reader; a: ARRAY MaxAddrs OF Sockets.Address; n, port, r: LONGINT; path, host, req: ARRAY 512 OF CHAR; s: Sockets.Socket; i, j: LONGINT;
 BEGIN
   Texts.OpenArgs(A);
-  IF ~Target(A, a, port) THEN RETURN END;
+  IF ~Target(A, host, a, n, port) THEN RETURN END;
   IF ~Texts.Arg(A, path) THEN path := "/" END;
-  s := Sockets.Connect(a, port);
-  IF s = NIL THEN Error("connect", Sockets.res); RETURN END;
-  Sockets.AddressToString(a, host);
+  s := Open(a, n, port);
+  IF s = NIL THEN RETURN END;
+  IF Sockets.ParseAddress(host, a[0]) THEN Sockets.AddressToString(a[0], host) END;
   req := "GET "; i := 4; j := 0; WHILE path[j] # 0X DO req[i] := path[j]; INC(i); INC(j) END;
 
   req[i] := 0X;
@@ -63,15 +89,15 @@ BEGIN
   Sockets.Close(s)
 END Get;
 
-(** net.Send address port text -- send text and print what comes back *)
+(** net.Send host port text -- send text and print what comes back *)
 PROCEDURE Send*;
-VAR A: Texts.Reader; a: Sockets.Address; port, r: LONGINT; text: ARRAY 1024 OF CHAR; s: Sockets.Socket;
+VAR A: Texts.Reader; a: ARRAY MaxAddrs OF Sockets.Address; n, port, r: LONGINT; host: ARRAY 256 OF CHAR; text: ARRAY 1024 OF CHAR; s: Sockets.Socket;
 BEGIN
   Texts.OpenArgs(A);
-  IF ~Target(A, a, port) THEN RETURN END;
+  IF ~Target(A, host, a, n, port) THEN RETURN END;
   IF ~Texts.Arg(A, text) THEN text := "" END;
-  s := Sockets.Connect(a, port);
-  IF s = NIL THEN Error("connect", Sockets.res); RETURN END;
+  s := Open(a, n, port);
+  IF s = NIL THEN RETURN END;
   r := Sockets.SendString(s, text);
   IF r < 0 THEN Error("send", r) ELSE Sockets.Shutdown(s, 1); Print(s) END;
   Sockets.Close(s)
@@ -102,17 +128,18 @@ BEGIN
   Sockets.Close(l)
 END Echo;
 
-(** net.UDP address port text -- send a datagram, print the answer and who sent it *)
+(** net.UDP host port text -- send a datagram (to the host's first address), print the answer and who sent it *)
 PROCEDURE UDP*;
-VAR A: Texts.Reader; a, from: Sockets.Address; port, fport, n, i: LONGINT; text, t: ARRAY 1024 OF CHAR; s: Sockets.Socket;
+VAR A: Texts.Reader; a: ARRAY MaxAddrs OF Sockets.Address; from: Sockets.Address; port, fport, n, i: LONGINT;
+  host: ARRAY 256 OF CHAR; text, t: ARRAY 1024 OF CHAR; s: Sockets.Socket;
 BEGIN
   Texts.OpenArgs(A);
-  IF ~Target(A, a, port) THEN RETURN END;
+  IF ~Target(A, host, a, n, port) THEN RETURN END;
   IF ~Texts.Arg(A, text) THEN text := "" END;
-  s := Sockets.OpenUDP(a.family, 0);
+  s := Sockets.OpenUDP(a[0].family, 0);
   IF s = NIL THEN Error("socket", Sockets.res); RETURN END;
   n := 0; WHILE text[n] # 0X DO INC(n) END;
-  n := Sockets.SendTo(s, a, port, text, n);
+  n := Sockets.SendTo(s, a[0], port, text, n);
   IF n < 0 THEN Error("send", n)
   ELSE
     n := Sockets.ReceiveFrom(s, text, LEN(text), from, fport);
@@ -124,6 +151,22 @@ BEGIN
   END;
   Sockets.Close(s)
 END UDP;
+
+(** net.Lookup name ... -- the addresses of each name *)
+PROCEDURE Lookup*;
+VAR A: Texts.Reader; name, t: ARRAY 256 OF CHAR; a: ARRAY MaxAddrs OF Sockets.Address; n, i: LONGINT;
+BEGIN
+  Texts.OpenArgs(A);
+  WHILE Texts.Arg(A, name) DO
+    DNS.Lookup(name, DNS.Any, a, n);
+    IF n = 0 THEN LookupError(name)
+    ELSE
+      out.String(name); out.String(":");
+      i := 0; WHILE i < n DO Sockets.AddressToString(a[i], t); out.Char(" "); out.String(t); INC(i) END;
+      out.Ln
+    END
+  END
+END Lookup;
 
 (** net.Address text -- the address in normal form, or "invalid" *)
 PROCEDURE Address*;
