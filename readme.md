@@ -135,6 +135,7 @@ on top of them; a host is a name or an address, and its addresses are tried in t
 bin/x86/loksh net.Get example.com 80 /           # HTTP/1.0 GET
 bin/x86/loksh net.Get ::1 8080 /index.html
 bin/x86/loksh net.Lookup example.com localhost   # the addresses of names
+bin/x86/loksh net.Resolve example.com           # only IPv4 (A); net.Resolve6: only IPv6 (AAAA)
 bin/x86/loksh net.Send 192.0.2.1 7 hello        # send a text, print the answer
 bin/x86/loksh net.Echo 7000 3                   # echo 3 connections, IPv6 and IPv4
 bin/x86/loksh net.UDP ::1 5353 hello            # a datagram, the answer and its sender

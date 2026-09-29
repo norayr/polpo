@@ -4,7 +4,9 @@ MODULE net;  (** minimal network tools over Sockets and DNS *)
    net.Send host port text        sends text, prints what comes back
    net.Echo port [count]          echoes count connections (default 1), IPv6 and IPv4
    net.UDP host port text         sends a datagram, prints the answer
-   net.Lookup name ...            the addresses of the names
+   net.Lookup name ...            the addresses of the names, IPv6 and IPv4
+   net.Resolve name ...           only the IPv4 addresses (A records)
+   net.Resolve6 name ...          only the IPv6 addresses (AAAA records)
    net.Address text ...           the addresses in normal form
    A host is a name or an IPv4 or IPv6 address; its addresses are tried in turn. *)
 
@@ -152,13 +154,13 @@ BEGIN
   Sockets.Close(s)
 END UDP;
 
-(** net.Lookup name ... -- the addresses of each name *)
-PROCEDURE Lookup*;
+(* the addresses of family of each name argument *)
+PROCEDURE Names(family: INTEGER);
 VAR A: Texts.Reader; name, t: ARRAY 256 OF CHAR; a: ARRAY MaxAddrs OF Sockets.Address; n, i: LONGINT;
 BEGIN
   Texts.OpenArgs(A);
   WHILE Texts.Arg(A, name) DO
-    DNS.Lookup(name, DNS.Any, a, n);
+    DNS.Lookup(name, family, a, n);
     IF n = 0 THEN LookupError(name)
     ELSE
       out.String(name); out.String(":");
@@ -166,7 +168,22 @@ BEGIN
       out.Ln
     END
   END
+END Names;
+
+(** net.Lookup name ... -- the IPv6 and IPv4 addresses of each name *)
+PROCEDURE Lookup*;
+BEGIN Names(DNS.Any)
 END Lookup;
+
+(** net.Resolve name ... -- the IPv4 addresses of each name *)
+PROCEDURE Resolve*;
+BEGIN Names(Sockets.Inet4)
+END Resolve;
+
+(** net.Resolve6 name ... -- the IPv6 addresses of each name *)
+PROCEDURE Resolve6*;
+BEGIN Names(Sockets.Inet6)
+END Resolve6;
 
 (** net.Address text -- the address in normal form, or "invalid" *)
 PROCEDURE Address*;
