@@ -1,6 +1,6 @@
 MODULE portia;  (** polpo's package manager; reads the package tree arden *)
 
-(* portia.List              the packages, i: all its files are here
+(* portia.List [category]   the packages, of a category: linux, system, devel, apps, lib
    portia.Info name         a package: description, dependencies, provides, conflicts
    portia.Files name        the files of a package on this architecture
    portia.Owner file        the package a file belongs to (sources, objects, data)
@@ -21,7 +21,8 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
 
    The tree: the environment variable PORTIA_TREE, Portia.Tree in Oberon.Text, or
    <polpo root>/../arden/. Package descriptions
-   are TOML (shared reader with vipak): <tree>/<name>/<name>-<version>.arden. *)
+   are TOML: <tree>/<category>/<name>/<name>-<version>.arden; INDEX lists category/name
+   and version. Packages are found by name or by category/name. *)
 
 IMPORT Kernel, Linux0, SYSTEM, F := Files, Root, Texts := texts, Oberon := Oberon0, TOML, Versions, termios, out;
 
@@ -42,7 +43,7 @@ TYPE
 
   Package = POINTER TO PackageDesc;
   PackageDesc = RECORD
-    name, version, desc: Name;
+    name, category, version, desc: Name;  (* category: linux, system, devel, apps, lib *)
     deps, provides, conflicts, sources, files, modules, build: Item;  (* modules: names of sources *)
     next: Package
   END;
@@ -64,6 +65,11 @@ BEGIN
   j := 0; WHILE (t[j] # 0X) & (i < LEN(s) - 1) DO s[i] := t[j]; INC(i); INC(j) END;
   s[i] := 0X
 END Append;
+
+PROCEDURE Len(VAR s: ARRAY OF CHAR): LONGINT;
+VAR i: LONGINT;
+BEGIN i := 0; WHILE (i < LEN(s)) & (s[i] # 0X) DO INC(i) END; RETURN i
+END Len;
 
 PROCEDURE Add(VAR list: Item; s: ARRAY OF CHAR);  (* at the end *)
 VAR it, p: Item;
@@ -228,14 +234,19 @@ BEGIN
   END
 END Keys;
 
-PROCEDURE Load(VAR name, version: ARRAY OF CHAR): Package;
-VAR path: Name; buf: Buf; doc: TOML.Doc; p: Package; v: ARRAY 4096 OF CHAR; it: Item; mod: Name;
+(* load the package at entry, "category/name" (or "name") of the INDEX, in version *)
+PROCEDURE Load(VAR entry, version: ARRAY OF CHAR): Package;
+VAR path, name, cat: Name; buf: Buf; doc: TOML.Doc; p: Package; v: ARRAY 4096 OF CHAR; it: Item; mod: Name; i, j, k: LONGINT;
 BEGIN
-  COPY(tree, path); Append(path, name); Append(path, "/"); Append(path, name); Append(path, "-");
+  i := 0; k := -1; WHILE entry[i] # 0X DO IF entry[i] = "/" THEN k := i END; INC(i) END;
+  i := 0; WHILE i < k DO cat[i] := entry[i]; INC(i) END; cat[i] := 0X;
+  j := 0; i := k + 1; WHILE entry[i] # 0X DO name[j] := entry[i]; INC(i); INC(j) END; name[j] := 0X;
+  COPY(tree, path); IF cat # "" THEN Append(path, cat); Append(path, "/") END;
+  Append(path, name); Append(path, "/"); Append(path, name); Append(path, "-");
   Append(path, version); Append(path, ".arden");
   IF ~ReadFile(path, buf) THEN out.String("portia: cannot read "); out.String(path); out.Ln; RETURN NIL END;
   doc := TOML.Parse(buf^);
-  NEW(p); COPY(name, p.name); COPY(version, p.version);
+  NEW(p); COPY(name, p.name); COPY(cat, p.category); COPY(version, p.version);
   IF ~Field(doc, "PACKAGE", "description", p.desc) THEN p.desc := "" END;
   Keys(doc, "DEPS", p.deps); Keys(doc, "PROVIDES", p.provides); Keys(doc, "CONFLICTS", p.conflicts);
   IF Field(doc, "MODULES", "all", v) THEN AddSources(p.sources, v) END;
@@ -278,10 +289,18 @@ BEGIN
   RETURN TRUE
 END LoadTree;
 
+(* the package name, or category/name *)
 PROCEDURE Find(VAR name: ARRAY OF CHAR): Package;
-VAR p: Package;
+VAR p: Package; i, k: LONGINT; cat, n: Name;
 BEGIN
-  p := packages; WHILE (p # NIL) & (p.name # name) DO p := p.next END;
+  i := 0; k := -1; WHILE name[i] # 0X DO IF name[i] = "/" THEN k := i END; INC(i) END;
+  IF k < 0 THEN
+    p := packages; WHILE (p # NIL) & (p.name # name) DO p := p.next END
+  ELSE
+    i := 0; WHILE i < k DO cat[i] := name[i]; INC(i) END; cat[i] := 0X;
+    i := 0; WHILE name[k+1+i] # 0X DO n[i] := name[k+1+i]; INC(i) END; n[i] := 0X;
+    p := packages; WHILE (p # NIL) & ((p.name # n) OR (p.category # cat)) DO p := p.next END
+  END;
   RETURN p
 END Find;
 
@@ -402,24 +421,28 @@ BEGIN
   END
 END ListItems;
 
-(** portia.List -- the packages of the tree; i: installed here, u: a newer version in the tree *)
+(** portia.List [category] -- the packages of the tree (of one category: linux, system,
+  devel, apps, lib); i: installed here, u: a newer version in the tree *)
 PROCEDURE List*;
-VAR p: Package; n: LONGINT; v: ARRAY 32 OF CHAR;
+VAR p: Package; n: LONGINT; v: ARRAY 32 OF CHAR; cat: Name; all: BOOLEAN;
 BEGIN
   IF ~LoadTree() THEN RETURN END;
+  all := ~Arg(cat);
   p := packages;
   WHILE p # NIL DO
+   IF all OR (p.category = cat) THEN
     IF ~IsInstalled(p) THEN out.String("  ")
     ELSIF haveDb & InstVer(p, v) & ~Versions.AtLeast(v, p.version) THEN out.String("u ")  (* upgradable *)
     ELSE out.String("i ")
     END;
-    out.String(p.name); n := 0; WHILE p.name[n] # 0X DO INC(n) END;
-    WHILE n < 24 DO out.Char(" "); INC(n) END;
+    out.String(p.category); out.Char("/"); out.String(p.name);
+    n := 1 + Len(p.category) + Len(p.name); WHILE n < 30 DO out.Char(" "); INC(n) END;
     IF haveDb & InstVer(p, v) & (Versions.Compare(v, p.version) # 0) THEN
       out.String(v); out.String(" -> "); out.String(p.version)
     ELSE out.String(p.version)
     END;
-    out.String("  "); out.String(p.desc); out.Ln;
+    out.String("  "); out.String(p.desc); out.Ln
+   END;
     p := p.next
   END
 END List;
@@ -432,7 +455,7 @@ BEGIN
   IF ~LoadTree() THEN RETURN END;
   p := Find(name);
   IF p = NIL THEN out.String("portia: no package "); out.String(name); out.Ln; RETURN END;
-  out.String(p.name); out.Char(" "); out.String(p.version); out.String(": "); out.String(p.desc); out.Ln;
+  out.String(p.category); out.Char("/"); out.String(p.name); out.Char(" "); out.String(p.version); out.String(": "); out.String(p.desc); out.Ln;
   ListItems("depends on:", p.deps); ListItems("provides:", p.provides); ListItems("conflicts with:", p.conflicts);
   ListItems("modules:", p.modules);
   n := 0; it := p.files; WHILE it # NIL DO INC(n); it := it.next END;

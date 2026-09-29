@@ -70,10 +70,12 @@ are left alone.
 polpo is described as packages in the tree arden (next to polpo, `../arden`, or
 `Portia.Tree` in `Oberon.Text`): core, console, xxs, the compilers, the desktop, the
 display variants and more, each with its modules per architecture, data files and
-dependencies. portia reads it:
+dependencies, sorted into categories: `linux` (packages producing Linux executables, like
+core with `loksh`), `system`, `devel`, `apps`, `lib`. portia reads it:
 
 ```
 bin/x86/loksh portia.List                    # the packages; i: installed
+bin/x86/loksh portia.List apps               # one category
 bin/x86/loksh portia.Info display-sixel      # dependencies, provides, conflicts, modules
 bin/x86/loksh portia.Files xxs               # the files of a package on this architecture
 bin/x86/loksh portia.Owner obj/x86/Display.Obj
