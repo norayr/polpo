@@ -675,5 +675,107 @@ BEGIN
   UNTIL i=0;
 END CopyRegs;
 
+(* polpo: sockets, direct system calls (not socketcall); data also with Read0/Write0 *)
+
+PROCEDURE Bind0*( fd, addr, len: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4169);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END Bind0;
+
+PROCEDURE Listen0*( fd, backlog: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4174);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END Listen0;
+
+PROCEDURE Accept40*( fd, addr, lenadr, flags: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4334);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END Accept40;
+
+PROCEDURE GetSockName0*( fd, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4172);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END GetSockName0;
+
+PROCEDURE GetPeerName0*( fd, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4171);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END GetPeerName0;
+
+PROCEDURE SetSockOpt0*( fd, level, name, val, len: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4181);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END SetSockOpt0;
+
+PROCEDURE GetSockOpt0*( fd, level, name, val, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4173);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END GetSockOpt0;
+
+PROCEDURE Shutdown0*( fd, how: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4182);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END Shutdown0;
+
+PROCEDURE SendTo0*( fd, buf, len, flags, addr, addrlen: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4180);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END SendTo0;
+
+PROCEDURE RecvFrom0*( fd, buf, len, flags, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( 2, 4176);
+  SYSTEM.CODE( 12);              (* SYSCALL *)
+  SYSTEM.CODE( 10070004H);      (* BEQ R7, R0, +16*)
+  SYSTEM.CODE( 0);              (* NOP , branch delay slot*)
+  SYSTEM.CODE( 10000002H);        (* B +8 *)
+  SYSTEM.CODE( 00021022H);        (* SUB R2, 0, R2, branch delay slot  *)
+END RecvFrom0;
+
 END Linux0.
 

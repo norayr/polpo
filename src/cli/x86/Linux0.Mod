@@ -726,5 +726,125 @@ CODE {SYSTEM.i386}
   REP  STOSD
 END Fill4;
 
+(* polpo: sockets, direct system calls (not socketcall); data also with Read0/Write0 *)
+
+PROCEDURE Accept40*( fd, addr, lenadr, flags: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 364
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, addr[ EBP]
+  MOV  EDX, lenadr[ EBP]
+  MOV  ESI, flags[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+END Accept40;
+
+PROCEDURE GetSockName0*( fd, addr, lenadr: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 367
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, addr[ EBP]
+  MOV  EDX, lenadr[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+END GetSockName0;
+
+PROCEDURE GetPeerName0*( fd, addr, lenadr: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 368
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, addr[ EBP]
+  MOV  EDX, lenadr[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+END GetPeerName0;
+
+PROCEDURE SetSockOpt0*( fd, level, name, val, len: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 366
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, level[ EBP]
+  MOV  EDX, name[ EBP]
+  MOV  ESI, val[ EBP]
+  MOV  EDI, len[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+END SetSockOpt0;
+
+PROCEDURE GetSockOpt0*( fd, level, name, val, lenadr: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 365
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, level[ EBP]
+  MOV  EDX, name[ EBP]
+  MOV  ESI, val[ EBP]
+  MOV  EDI, lenadr[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+END GetSockOpt0;
+
+PROCEDURE Shutdown0*( fd, how: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 373
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, how[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+END Shutdown0;
+
+PROCEDURE SendTo0*( fd, buf, len, flags, addr, addrlen: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  EBP
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 369
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, buf[ EBP]
+  MOV  EDX, len[ EBP]
+  MOV  ESI, flags[ EBP]
+  MOV  EDI, addr[ EBP]
+  MOV  EBP, addrlen[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+  POP  EBP
+END SendTo0;
+
+PROCEDURE RecvFrom0*( fd, buf, len, flags, addr, lenadr: LONGINT): LONGINT;
+CODE {SYSTEM.i386}
+  PUSH  EBP
+  PUSH  ESI
+  PUSH  EDI
+  MOV  EAX, 371
+  MOV  EBX, fd[ EBP]
+  MOV  ECX, buf[ EBP]
+  MOV  EDX, len[ EBP]
+  MOV  ESI, flags[ EBP]
+  MOV  EDI, addr[ EBP]
+  MOV  EBP, lenadr[ EBP]
+  INT  80H
+  POP  EDI
+  POP  ESI
+  POP  EBP
+END RecvFrom0;
+
 END Linux0.
 

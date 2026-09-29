@@ -560,5 +560,126 @@ CODE
 END fesetround;
 *)
 
+(* polpo: sockets, direct system calls (not socketcall); data also with Read0/Write0 *)
+
+PROCEDURE Bind0*( fd, addr, len: LONGINT): LONGINT;
+CODE
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 26    (* 282 *)
+  SWI  0
+  MOV  PC, LR
+END Bind0;
+
+PROCEDURE Listen0*( fd, backlog: LONGINT): LONGINT;
+CODE
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 28    (* 284 *)
+  SWI  0
+  MOV  PC, LR
+END Listen0;
+
+PROCEDURE Accept40*( fd, addr, lenadr, flags: LONGINT): LONGINT;
+CODE
+  LDR  R3, [SP],4
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 110    (* 366 *)
+  SWI  0
+  MOV  PC, LR
+END Accept40;
+
+PROCEDURE GetSockName0*( fd, addr, lenadr: LONGINT): LONGINT;
+CODE
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 30    (* 286 *)
+  SWI  0
+  MOV  PC, LR
+END GetSockName0;
+
+PROCEDURE GetPeerName0*( fd, addr, lenadr: LONGINT): LONGINT;
+CODE
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 31    (* 287 *)
+  SWI  0
+  MOV  PC, LR
+END GetPeerName0;
+
+PROCEDURE SetSockOpt0*( fd, level, name, val, len: LONGINT): LONGINT;
+CODE
+  LDR  R4, [SP],4
+  LDR  R3, [SP],4
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 38    (* 294 *)
+  SWI  0
+  MOV  PC, LR
+END SetSockOpt0;
+
+PROCEDURE GetSockOpt0*( fd, level, name, val, lenadr: LONGINT): LONGINT;
+CODE
+  LDR  R4, [SP],4
+  LDR  R3, [SP],4
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 39    (* 295 *)
+  SWI  0
+  MOV  PC, LR
+END GetSockOpt0;
+
+PROCEDURE Shutdown0*( fd, how: LONGINT): LONGINT;
+CODE
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 37    (* 293 *)
+  SWI  0
+  MOV  PC, LR
+END Shutdown0;
+
+PROCEDURE SendTo0*( fd, buf, len, flags, addr, addrlen: LONGINT): LONGINT;
+CODE
+  LDR  R5, [SP],4
+  LDR  R4, [SP],4
+  LDR  R3, [SP],4
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 34    (* 290 *)
+  SWI  0
+  MOV  PC, LR
+END SendTo0;
+
+PROCEDURE RecvFrom0*( fd, buf, len, flags, addr, lenadr: LONGINT): LONGINT;
+CODE
+  LDR  R5, [SP],4
+  LDR  R4, [SP],4
+  LDR  R3, [SP],4
+  LDR  R2, [SP],4
+  LDR  R1, [SP],4
+  LDR  R0, [SP],4
+  MOV  R7, 100H
+  ADD  R7, R7, 36    (* 292 *)
+  SWI  0
+  MOV  PC, LR
+END RecvFrom0;
+
 END Linux0.
 

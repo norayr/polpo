@@ -36,6 +36,8 @@ a7compiler.Compile /s src/cli/xxs.Mod
 a7compiler.Compile /s src/lib/toml/TOML.Mod
 a7compiler.Compile /s src/lib/versions/Versions.Mod
 a7compiler.Compile /s src/cli/portia.Mod
+a7compiler.Compile /s src/lib/sockets/Sockets.Mod
+a7compiler.Compile /s src/cli/net.Mod
 
 # native ARMv7 compiler and boot linker, so the ARMv7 system can rebuild itself
 a7compiler.Compile /s src/cli/rop2/ROPM.Mod

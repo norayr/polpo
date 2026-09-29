@@ -735,6 +735,88 @@ BEGIN
   UNTIL i=0;
 END CopyRegs;
 
+(* polpo: sockets, direct system calls (not socketcall); data also with Read0/Write0 *)
+
+PROCEDURE Bind0*( fd, addr, len: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA3);
+  SYSTEM.PUTREG(7, 282);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END Bind0;
+
+PROCEDURE Listen0*( fd, backlog: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA2);
+  SYSTEM.PUTREG(7, 284);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END Listen0;
+
+PROCEDURE Accept40*( fd, addr, lenadr, flags: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA4);
+  SYSTEM.PUTREG(7, 366);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END Accept40;
+
+PROCEDURE GetSockName0*( fd, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA3);
+  SYSTEM.PUTREG(7, 286);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END GetSockName0;
+
+PROCEDURE GetPeerName0*( fd, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA3);
+  SYSTEM.PUTREG(7, 287);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END GetPeerName0;
+
+PROCEDURE SetSockOpt0*( fd, level, name, val, len: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA5);
+  SYSTEM.PUTREG(7, 294);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END SetSockOpt0;
+
+PROCEDURE GetSockOpt0*( fd, level, name, val, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA5);
+  SYSTEM.PUTREG(7, 295);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END GetSockOpt0;
+
+PROCEDURE Shutdown0*( fd, how: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA2);
+  SYSTEM.PUTREG(7, 293);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END Shutdown0;
+
+PROCEDURE SendTo0*( fd, buf, len, flags, addr, addrlen: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA6);
+  SYSTEM.PUTREG(7, 290);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END SendTo0;
+
+PROCEDURE RecvFrom0*( fd, buf, len, flags, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.CODE(LDMIA6);
+  SYSTEM.PUTREG(7, 292);
+  SYSTEM.CODE(SVC);
+  SYSTEM.CODE(BX);
+END RecvFrom0;
+
 BEGIN
   softDiv:=Div;
 (*

@@ -13,8 +13,8 @@ MODULE portia;  (** polpo's package manager; reads the package tree arden *)
    portia.Install [/arch] name ...  build, link and record packages; dependencies only when
                             missing or older than needed
    portia.Upgrade [/arch] [name ...]  the installed packages with newer versions in the tree
-   When the interface of a module changes (its symbol file), the installed packages
-   depending on its package are recompiled, and so on.
+   When the interface of a module changes (its symbol file), the installed packages with a
+   module importing it are recompiled, and so on.
    portia.Remove [/arch] name ...   delete their objects and unrecord them, if nothing needs them
    portia.Graph [name]      the dependencies as a Graphviz (.dot) graph
    portia.Record, portia.Mark name, portia.Unmark name   the record of installed packages
@@ -55,6 +55,7 @@ VAR
   imports: Item;  (* of the last source parsed *)
   installed: Item; haveDb: BOOLEAN;  (* the installed packages of this architecture, portia.<arch> *)
   assumeYes: BOOLEAN;  (* /y: do not ask *)
+  changedMods: Item;  (* modules whose interface changed in this run *)
 
 (* ----- strings and lists ----- *)
 
@@ -699,7 +700,8 @@ BEGIN
           IF had THEN F.Delete(old, res) END;
           SymKey(modn[i].s, l1, a1, b1);
           IF (l0 > 0) & ((l1 # l0) OR (a1 # a0) OR (b1 # b0)) THEN
-            out.String("portia: the interface of "); out.String(modn[i].s); out.String(" changed"); out.Ln; changed := TRUE
+            out.String("portia: the interface of "); out.String(modn[i].s); out.String(" changed"); out.Ln; changed := TRUE;
+            IF ~Has(changedMods, modn[i].s) THEN Add(changedMods, modn[i].s) END
           END;
           done[i] := TRUE; DEC(left); progress := TRUE
         END
@@ -907,7 +909,7 @@ END AddNeeded;
 
 (* build the packages of set in dependency order, link, record them; replace conflicts *)
 PROCEDURE Execute(set: Item; verb: ARRAY OF CHAR);
-VAR order, it, c, cf, d: Item; p, q, r: Package; ok, changed: BOOLEAN; line: Name; n: LONGINT; v: ARRAY 32 OF CHAR;
+VAR order, it, c, cf, d, im: Item; p, q: Package; ok, changed: BOOLEAN; line, mod: Name; n: LONGINT; v: ARRAY 32 OF CHAR;
 BEGIN
   order := NIL; it := set; WHILE it # NIL DO p := Find(it.s); Order(p, order); it := it.next END;
   q := packages; WHILE q # NIL DO IF IsInstalled(q) THEN Order(q, order) END; q := q.next END;  (* for importers *)
@@ -928,22 +930,25 @@ BEGIN
   END;
   out.String("  (installed packages importing an interface that changes are recompiled too)"); out.Ln;
   IF ~Confirm(n, verb) THEN out.String("portia: nothing done"); out.Ln; RETURN END;
-  n := 0;
+  n := 0; changedMods := NIL;
   ok := TRUE; it := order;
   WHILE ok & (it # NIL) DO
     p := Find(it.s);
     IF Has(set, p.name) THEN
       ok := BuildPackage(p, changed); INC(n);
-      IF ok & changed THEN  (* its importers are recompiled when their turn comes *)
+      IF ok & changed THEN  (* packages importing a changed module are recompiled when their turn comes *)
         q := packages;
         WHILE q # NIL DO
           IF IsInstalled(q) & ~Has(set, q.name) THEN
-            d := q.deps;
-            WHILE d # NIL DO
-              r := Resolve(d.s);
-              IF (r = p) & ~Has(set, q.name) THEN
-                Add(set, q.name); out.String("portia: recompiling "); out.String(q.name);
-                out.String(" for the new interface of "); out.String(p.name); out.Ln
+            d := q.sources;
+            WHILE (d # NIL) & ~Has(set, q.name) DO
+              IF Header(d.s, mod) THEN
+                im := imports;
+                WHILE (im # NIL) & ~Has(changedMods, im.s) DO im := im.next END;
+                IF im # NIL THEN
+                  Add(set, q.name); out.String("portia: recompiling "); out.String(q.name);
+                  out.String(", "); out.String(mod); out.String(" imports "); out.String(im.s); out.Ln
+                END
               END;
               d := d.next
             END

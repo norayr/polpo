@@ -122,6 +122,21 @@ switch after `make sixel`. Installing, removing and fetching packages come next.
 package descriptions are TOML. Libraries the base system needs live in `src/lib/<name>/`
 (`toml`, `versions`), each a package of the `lib` category.
 
+### Network
+
+`Sockets` (`src/lib/sockets`) is TCP and UDP over IPv4 and IPv6, on every port, with the
+socket system calls of `Linux0`. `net` is a set of minimal tools on top of it (names need
+DNS, which comes next, so for now addresses):
+
+```
+bin/x86/loksh net.Get 192.0.2.1 80 /index.html   # HTTP/1.0 GET
+bin/x86/loksh net.Get ::1 8080 /
+bin/x86/loksh net.Send 192.0.2.1 7 hello        # send a text, print the answer
+bin/x86/loksh net.Echo 7000 3                   # echo 3 connections, IPv6 and IPv4
+bin/x86/loksh net.UDP ::1 5353 hello            # a datagram, the answer and its sender
+bin/x86/loksh net.Address 2001:0db8:0:0:0:0:0:1 # addresses in normal form: 2001:db8::1
+```
+
 ### xxs, a console editor
 
 `xxs` is a small nano-like editor for the console, the size that fits every terminal:

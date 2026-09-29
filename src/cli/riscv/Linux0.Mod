@@ -553,5 +553,83 @@ BEGIN
   UNTIL i=0;
 END CopyRegs;
 
+(* polpo: sockets, direct system calls (not socketcall); data also with Read0/Write0 *)
+
+PROCEDURE Bind0*( fd, addr, len: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 200);
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END Bind0;
+
+PROCEDURE Listen0*( fd, backlog: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 201);
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END Listen0;
+
+PROCEDURE Accept40*( fd, addr, lenadr, flags: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 242);
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END Accept40;
+
+PROCEDURE GetSockName0*( fd, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 204);
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END GetSockName0;
+
+PROCEDURE GetPeerName0*( fd, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 205);
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END GetPeerName0;
+
+PROCEDURE SetSockOpt0*( fd, level, name, val, len: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 208);
+  SYSTEM.CODE( LWr14);    (* 5th parameter from sp+16 *)
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END SetSockOpt0;
+
+PROCEDURE GetSockOpt0*( fd, level, name, val, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 209);
+  SYSTEM.CODE( LWr14);    (* 5th parameter from sp+16 *)
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END GetSockOpt0;
+
+PROCEDURE Shutdown0*( fd, how: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 210);
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END Shutdown0;
+
+PROCEDURE SendTo0*( fd, buf, len, flags, addr, addrlen: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 206);
+  SYSTEM.CODE( LWr14);    (* 5th parameter from sp+16 *)
+  SYSTEM.CODE( LWr15);    (* 6th parameter from sp+20 *)
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END SendTo0;
+
+PROCEDURE RecvFrom0*( fd, buf, len, flags, addr, lenadr: LONGINT): LONGINT;
+BEGIN
+  SYSTEM.PUTREG( NRR, 207);
+  SYSTEM.CODE( LWr14);    (* 5th parameter from sp+16 *)
+  SYSTEM.CODE( LWr15);    (* 6th parameter from sp+20 *)
+  SYSTEM.CODE( ECALL);
+  SYSTEM.CODE( JALR);
+END RecvFrom0;
+
 END Linux0.
 
