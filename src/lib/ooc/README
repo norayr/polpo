@@ -1,0 +1,7 @@
+The OOC library modules oocIntStr needs, from voc (src/library/ooc), for code shared
+between voc and polpo (http). Copyright Michael Griebling and others, LGPL (see the
+module headers).
+
+Changed for the polpo compilers: FOR loops are WHILE loops (the ARM compiler has no FOR),
+oocCharClass.systemEol is exported with * instead of - (read-only exports are not known
+to the ARM compiler). The interfaces are those of voc.

@@ -38,6 +38,19 @@ a7compiler.Compile /s src/lib/versions/Versions.Mod
 a7compiler.Compile /s src/cli/portia.Mod
 a7compiler.Compile /s src/lib/sockets/Sockets.Mod
 a7compiler.Compile /s src/lib/dns/DNS.Mod
+a7compiler.Compile /s src/lib/ooc/oocAscii.Mod
+a7compiler.Compile /s src/lib/ooc/oocCharClass.Mod
+a7compiler.Compile /s src/lib/ooc/oocConvTypes.Mod
+a7compiler.Compile /s src/lib/ooc/oocStrings.Mod
+a7compiler.Compile /s src/lib/ooc/oocIntConv.Mod
+a7compiler.Compile /s src/lib/ooc/oocIntStr.Mod
+a7compiler.Compile /s src/lib/strutils/strTypes.Mod
+a7compiler.Compile /s src/lib/strutils/strUtils.Mod
+a7compiler.Compile /s src/lib/base64/Base64.Mod
+a7compiler.Compile /s src/lib/internet/Internet.Mod
+a7compiler.Compile /s src/lib/http/hexIntStr.Mod
+a7compiler.Compile /s src/lib/http/http.Mod
+a7compiler.Compile /s src/cli/fetch.Mod
 a7compiler.Compile /s src/cli/net.Mod
 
 # native ARMv7 compiler and boot linker, so the ARMv7 system can rebuild itself

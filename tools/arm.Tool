@@ -38,6 +38,19 @@ acompiler.Compile /s src/lib/versions/Versions.Mod
 acompiler.Compile /s src/cli/portia.Mod
 acompiler.Compile /s src/lib/sockets/Sockets.Mod
 acompiler.Compile /s src/lib/dns/DNS.Mod
+acompiler.Compile /s src/lib/ooc/oocAscii.Mod
+acompiler.Compile /s src/lib/ooc/oocCharClass.Mod
+acompiler.Compile /s src/lib/ooc/oocConvTypes.Mod
+acompiler.Compile /s src/lib/ooc/oocStrings.Mod
+acompiler.Compile /s src/lib/ooc/oocIntConv.Mod
+acompiler.Compile /s src/lib/ooc/oocIntStr.Mod
+acompiler.Compile /s src/lib/strutils/strTypes.Mod
+acompiler.Compile /s src/lib/strutils/strUtils.Mod
+acompiler.Compile /s src/lib/base64/Base64.Mod
+acompiler.Compile /s src/lib/internet/Internet.Mod
+acompiler.Compile /s src/lib/http/hexIntStr.Mod
+acompiler.Compile /s src/lib/http/http.Mod
+acompiler.Compile /s src/cli/fetch.Mod
 acompiler.Compile /s src/cli/net.Mod
 
 # native ARM compiler and boot linker, so the ARM system can rebuild itself

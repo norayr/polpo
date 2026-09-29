@@ -37,6 +37,19 @@ rvcompiler.Compile /s src/lib/versions/Versions.Mod
 rvcompiler.Compile /s src/cli/portia.Mod
 rvcompiler.Compile /s src/lib/sockets/Sockets.Mod
 rvcompiler.Compile /s src/lib/dns/DNS.Mod
+rvcompiler.Compile /s src/lib/ooc/oocAscii.Mod
+rvcompiler.Compile /s src/lib/ooc/oocCharClass.Mod
+rvcompiler.Compile /s src/lib/ooc/oocConvTypes.Mod
+rvcompiler.Compile /s src/lib/ooc/oocStrings.Mod
+rvcompiler.Compile /s src/lib/ooc/oocIntConv.Mod
+rvcompiler.Compile /s src/lib/ooc/oocIntStr.Mod
+rvcompiler.Compile /s src/lib/strutils/strTypes.Mod
+rvcompiler.Compile /s src/lib/strutils/strUtils.Mod
+rvcompiler.Compile /s src/lib/base64/Base64.Mod
+rvcompiler.Compile /s src/lib/internet/Internet.Mod
+rvcompiler.Compile /s src/lib/http/hexIntStr.Mod
+rvcompiler.Compile /s src/lib/http/http.Mod
+rvcompiler.Compile /s src/cli/fetch.Mod
 rvcompiler.Compile /s src/cli/net.Mod
 
 # native RISC-V compiler and boot linker, so the RISC-V system can rebuild itself

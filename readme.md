@@ -142,6 +142,18 @@ bin/x86/loksh net.UDP ::1 5353 hello            # a datagram, the answer and its
 bin/x86/loksh net.Address 2001:0db8:0:0:0:0:0:1 # addresses in normal form: 2001:db8::1
 ```
 
+`http` (`src/lib/http`) is an HTTP/1.1 client (Content-Length, chunked, or to the end of the
+connection), and `fetch` uses it:
+
+```
+bin/x86/loksh fetch.Show http://example.com/          # the body on the screen
+bin/x86/loksh fetch.Get http://[::1]:8080/a.tar a.tar  # saved; without a file name: the last part of the path
+```
+
+`http`, `Internet`, `Sockets`, `DNS`, `strUtils` and `Base64` are the same files in voc
+(github.com/norayr: http, Internet, strutils, base64, branch polpo-compat), apart from their
+import lines; `tools/tovoc.py` writes the voc version of a file.
+
 ### xxs, a console editor
 
 `xxs` is a small nano-like editor for the console, the size that fits every terminal:

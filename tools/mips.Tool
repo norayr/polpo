@@ -37,6 +37,19 @@ mcompiler.Compile /s src/lib/versions/Versions.Mod
 mcompiler.Compile /s src/cli/portia.Mod
 mcompiler.Compile /s src/lib/sockets/Sockets.Mod
 mcompiler.Compile /s src/lib/dns/DNS.Mod
+mcompiler.Compile /s src/lib/ooc/oocAscii.Mod
+mcompiler.Compile /s src/lib/ooc/oocCharClass.Mod
+mcompiler.Compile /s src/lib/ooc/oocConvTypes.Mod
+mcompiler.Compile /s src/lib/ooc/oocStrings.Mod
+mcompiler.Compile /s src/lib/ooc/oocIntConv.Mod
+mcompiler.Compile /s src/lib/ooc/oocIntStr.Mod
+mcompiler.Compile /s src/lib/strutils/strTypes.Mod
+mcompiler.Compile /s src/lib/strutils/strUtils.Mod
+mcompiler.Compile /s src/lib/base64/Base64.Mod
+mcompiler.Compile /s src/lib/internet/Internet.Mod
+mcompiler.Compile /s src/lib/http/hexIntStr.Mod
+mcompiler.Compile /s src/lib/http/http.Mod
+mcompiler.Compile /s src/cli/fetch.Mod
 mcompiler.Compile /s src/cli/net.Mod
 
 # native MIPS compiler and boot linker, so the MIPS system can rebuild itself
