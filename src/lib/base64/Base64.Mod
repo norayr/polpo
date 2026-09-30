@@ -81,7 +81,9 @@ BEGIN
     INC(i, 3);
     INC(j, 4);
   END;
-  dst[j] := 0X; (* Null-terminate the dst string *)
+  IF j < dstLen THEN dst[j] := 0X  (* Null-terminate the dst string *)
+  ELSE Out.String("destination capacity is not enough for the 0X after the base64 encoded string"); Out.Ln; HALT(100)
+  END
 END EncodeString;
 
 PROCEDURE GetDecodingChar(ch: CHAR): LONGINT;
@@ -103,7 +105,7 @@ END GetDecodingChar;
 
 PROCEDURE DecodeString*(src: ARRAY OF CHAR; VAR dst: ARRAY OF CHAR);
 VAR
-  i, j, k, srcLength, dstLen: LONGINT;
+  i, j, k, n, srcLength, dstLen: LONGINT;
   block: ARRAY 4 OF LONGINT;
   dec: ARRAY 3 OF LONGINT;
 BEGIN
@@ -132,12 +134,15 @@ BEGIN
     dec[1] := ((block[1] MOD 16) * 16) + (block[2] DIV 4);
     dec[2] := ((block[2] MOD 4) * 64) + block[3];
 
-    (* write the decoded bytes, adjusting for any padding *)
-    k := 0;
-    WHILE k <= 2 DO
-      IF (j < dstLen) & (i + k*4/3 < srcLength - k) THEN
+    (* write the decoded bytes: n characters before the padding give n - 1 bytes *)
+    n := k - 1; k := 0;
+    WHILE k < n DO
+      IF j < dstLen - 1 THEN
         dst[j] := CHR(dec[k]);
         INC(j);
+      ELSE
+        Out.String("destination capacity is not enough to fit base64 decoded string"); Out.Ln;
+        HALT(100)
       END;
       INC(k)
     END;

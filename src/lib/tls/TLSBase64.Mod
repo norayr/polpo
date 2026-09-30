@@ -93,7 +93,9 @@ BEGIN
     INC(i, 3);
     INC(j, 4)
   END;
-  dst[j] := 0X
+  IF j < dstLen THEN dst[j] := 0X
+  ELSE Out.String("destination capacity is not enough for the 0X after the base64 encoded string"); Out.Ln; HALT(100)
+  END
 END EncodeString;
 
 (* Binary-safe decoder.  Whitespace is ignored.  dst.len is authoritative;
