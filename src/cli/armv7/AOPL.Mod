@@ -660,6 +660,7 @@ END PutTrap;
     IF (x.offset # ZeroVal) OR (x.reg = VirtualFP) THEN
       IF x.reg # VirtualFP THEN ReleaseR(x.reg) END;
       GetR( TempReg, rt); AddUpperToBase(x, Adr);
+      IF x.reg # rt THEN ReleaseR(x.reg) END;  (* polpo: the base from AddUpperToBase serves the next instruction only, as in Load and Store; it leaked a register per large offset *)
       IF (x.offset>=0)  THEN PutI( ADDI, rt, x.reg, x.offset);  (* must be addi for x.offset=0 because of localAccess *)
       ELSE PutI( SUBI, rt, x.reg, -x.offset);
       END;
