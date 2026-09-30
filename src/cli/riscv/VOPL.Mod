@@ -690,12 +690,14 @@ END PutTrap;
         IF (x.Tjmp = 0) & (x.Fjmp = 0) THEN  (*  use SLT *)
           IF (x.offset= BLT) THEN  PutR( SLT, rt, x.reg, x.reg2);
           ELSIF (x.offset= BLTU) THEN  PutR( SLTU, rt, x.reg, x.reg2);
-          ELSIF (x.offset= BNE) THEN
-            IF (x.reg2#0) THEN PutR( XOR, x.reg, x.reg, x.reg2) END;
-            PutR( SLTU, rt, 0, x.reg);
+          ELSIF (x.offset= BNE) THEN  (* polpo: XOR into rt; into x.reg it destroyed a register variable (b := i = 5 set i to 0) *)
+            IF (x.reg2#0) THEN PutR( XOR, rt, x.reg, x.reg2); PutR( SLTU, rt, 0, rt)
+            ELSE PutR( SLTU, rt, 0, x.reg)
+            END;
           ELSIF (x.offset= BEQ) THEN
-            IF (x.reg2#0) THEN PutR( XOR, x.reg, x.reg, x.reg2) END;
-            PutI( SLTIU, rt, x.reg, 1);
+            IF (x.reg2#0) THEN PutR( XOR, rt, x.reg, x.reg2); PutI( SLTIU, rt, rt, 1)
+            ELSE PutI( SLTIU, rt, x.reg, 1)
+            END;
           ELSIF (x.offset= BGE) THEN PutR( SLT, rt, x.reg, x.reg2); PutI( XORI, rt, rt, -1);
           ELSIF (x.offset= BGEU) THEN PutR( SLTU, rt, x.reg, x.reg2); PutI( XORI, rt, rt, -1);
           ELSE OPM.err( 700);
