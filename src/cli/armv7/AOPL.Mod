@@ -655,16 +655,17 @@ END PutTrap;
   END AddUpperToBase;
   
   PROCEDURE LoadAddr*(VAR x: Item; rt: LONGINT);  (* returned x.mode = Reg, x.reg # VirtualFP *)
+    VAR b: LONGINT;
   BEGIN
     Base(x, rt);
     IF (x.offset # ZeroVal) OR (x.reg = VirtualFP) THEN
-      IF x.reg # VirtualFP THEN ReleaseR(x.reg) END;
-      GetR( TempReg, rt); AddUpperToBase(x, Adr);
-      IF x.reg # rt THEN ReleaseR(x.reg) END;  (* polpo: the base from AddUpperToBase serves the next instruction only, as in Load and Store; it leaked a register per large offset *)
-      IF (x.offset>=0)  THEN PutI( ADDI, rt, x.reg, x.offset);  (* must be addi for x.offset=0 because of localAccess *)
-      ELSE PutI( SUBI, rt, x.reg, -x.offset);
+      (* polpo: AddUpperToBase before releasing the base (see the RISC-V VOPL) *)
+      AddUpperToBase(x, Adr); b := x.reg; ReleaseR(b);
+      GetR( TempReg, rt);
+      IF (x.offset>=0)  THEN PutI( ADDI, rt, b, x.offset);  (* must be addi for x.offset=0 because of localAccess *)
+      ELSE PutI( SUBI, rt, b, -x.offset);
       END;
-      x.reg := rt;
+      x.reg := rt
     END ;
     x.mode := Reg; x.typ := OPT.linttyp
   END LoadAddr;

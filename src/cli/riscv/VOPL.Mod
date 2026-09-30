@@ -633,13 +633,16 @@ END PutTrap;
   END AddUpperToBase;
 
   PROCEDURE LoadAddr*(VAR x: Item; rt: LONGINT);  (* returned x.mode = Reg, x.reg # VirtualFP *)
+    VAR b: LONGINT;
   BEGIN
     Base(x, rt);
     IF (x.offset # 0) OR (x.reg = VirtualFP) THEN
-      IF x.reg # VirtualFP THEN ReleaseR(x.reg) END ;
-      GetR(TempReg, rt); AddUpperToBase(x);
-      IF x.reg # rt THEN ReleaseR(x.reg) END;  (* polpo: the base from AddUpperToBase serves the next instruction only, as in Load and Store *)
-      PutI(ADDI, rt, x.reg, x.offset); x.reg := rt
+      (* polpo: AddUpperToBase before releasing the base: for a large offset it takes a new register
+         while the base must still be live (released first, the base was taken again and destroyed);
+         the base then serves the next instruction only, as in Load and Store *)
+      AddUpperToBase(x); b := x.reg; ReleaseR(b);
+      GetR(TempReg, rt);
+      PutI(ADDI, rt, b, x.offset); x.reg := rt
     END ;
     x.mode := Reg; x.typ := OPT.linttyp
   END LoadAddr;

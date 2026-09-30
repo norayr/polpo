@@ -564,13 +564,14 @@ END PutTrap;
   END AddUpperToBase;
 
   PROCEDURE LoadAddr*(VAR x: Item; rt: LONGINT);  (* returned x.mode = Reg, x.reg # VirtualFP *)
+    VAR b: LONGINT;
   BEGIN
     Base(x, rt);
     IF (x.offset # 0) OR (x.reg = VirtualFP) THEN
-      IF x.reg # VirtualFP THEN ReleaseR(x.reg) END ;
-      GetR(TempReg, rt); AddUpperToBase(x);
-      IF x.reg # rt THEN ReleaseR(x.reg) END;  (* polpo: the base from AddUpperToBase serves the next instruction only, as in Load and Store *)
-      PutI( ADDIU, rt, x.reg, x.offset); x.reg := rt
+      (* polpo: AddUpperToBase before releasing the base (see the RISC-V VOPL) *)
+      AddUpperToBase(x); b := x.reg; ReleaseR(b);
+      GetR(TempReg, rt);
+      PutI( ADDIU, rt, b, x.offset); x.reg := rt
     END ;
     x.mode := Reg; x.typ := OPT.linttyp
   END LoadAddr;
