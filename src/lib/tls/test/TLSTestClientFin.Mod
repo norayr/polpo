@@ -38,7 +38,7 @@ END MakeSeq32;
 PROCEDURE BuildServerSide(VAR shared, transcript0: TLSBytes.Buffer;
                           VAR clientKey, clientIV, serverKey, serverIV, clientFinKey, serverFinKey: TLSBytes.Buffer;
                           VAR transcriptAfterServer: TLSBytes.Buffer): BOOLEAN;
-VAR th, ee, fin, plain, record: TLSBytes.Buffer; saw, ok: BOOLEAN;
+VAR th, ee, fin, plain, record, t: TLSBytes.Buffer; saw, ok, refused: BOOLEAN;
 BEGIN
   TLS13Keys.HashMessages(transcript0, th);
   TLS13Keys.HandshakeKeys(shared, th, clientKey, clientIV, serverKey, serverIV, clientFinKey, serverFinKey);
@@ -54,8 +54,14 @@ BEGIN
   TLSBytes.Append(plain, fin);
   TLS13Records.ProtectRecord(serverKey, serverIV, 0, TLS13Records.Handshake, plain, record);
 
+  (* without Certificate and CertificateVerify the client refuses this flight *)
+  TLSBytes.Copy(transcript0, t);
+  TLS13EncHandshake.ResetState;
+  refused := ~(TLS13EncHandshake.OpenServerHandshakeRecord(serverKey, serverIV, 0, record, t, serverFinKey, saw, ok) & saw & ok);
   TLSBytes.Copy(transcript0, transcriptAfterServer);
-  RETURN TLS13EncHandshake.OpenServerHandshakeRecord(serverKey, serverIV, 0, record, transcriptAfterServer, serverFinKey, saw, ok) & saw & ok
+  TLSBytes.Append(transcriptAfterServer, ee);
+  TLSBytes.Append(transcriptAfterServer, fin);
+  RETURN refused
 END BuildServerSide;
 
 PROCEDURE TestClientFinished;
@@ -71,7 +77,7 @@ BEGIN
   TLSBytes.AppendString(transcript0, "client hello and server hello");
 
   ok := BuildServerSide(shared, transcript0, clientKey, clientIV, serverKey, serverIV, clientFinKey, serverFinKey, transcriptAfterServer);
-  Out.String("server pre   = "); SayResult(ok);
+  Out.String("no cert rej  = "); SayResult(ok);
   Out.String("server tr n  = "); Out.Int(transcriptAfterServer.len, 0); Out.Ln;
   SayResult(transcriptAfterServer.len = 71);
 

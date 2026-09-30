@@ -24,6 +24,7 @@ TYPE
 
 VAR
   verbose*: BOOLEAN;  (** hex dumps of the records and progress messages *)
+  lastError*: ARRAY 128 OF CHAR;  (** why the last Connect failed *)
   (* on the heap: 1.3 MB of locals was too much for the stack of polpo (8 MB with the rest), and
      as module variables too far for the PC relative addresses of its ARMv7 compiler *)
   chain: Chain;
@@ -135,6 +136,11 @@ BEGIN
 END CopyArrayToBuffer;
 
 
+PROCEDURE Fail(why: ARRAY OF CHAR);
+BEGIN
+  COPY(why, lastError); Out.String("TLS13Live: "); Out.String(why); Out.Ln
+END Fail;
+
 PROCEDURE CheckCapturedCertificateChain(host: ARRAY OF CHAR): BOOLEAN;
 VAR
   i, n: LONGINT;
@@ -176,13 +182,13 @@ BEGIN
   IF verbose THEN Out.String(" namesOK="); IF res.allNamesOK THEN Out.String("true") ELSE Out.String("false") END END;
   IF verbose THEN Out.String(" failedAt="); Out.Int(res.failedAt, 0); Out.Ln END;
 
-  (* For this first live integration we report the result but only require
-     hostname success; real hard-fail on chain trust comes after we add the
-     missing signature algorithms seen in the wild. *)
-  RETURN TLS13EncHandshake.HostnameOK()
+  IF ~ok THEN Fail("the certificate chain is not trusted"); RETURN FALSE END;
+  IF ~TLS13EncHandshake.HostnameOK() THEN Fail("the certificate is not for this host name"); RETURN FALSE END;
+  IF ~TLS13EncHandshake.CertificateVerifyOK() THEN Fail("CertificateVerify did not verify"); RETURN FALSE END;
+  RETURN TRUE
 END CheckCapturedCertificateChain;
 
-PROCEDURE Connect*(host, port: ARRAY OF CHAR; VAR s: State): BOOLEAN;
+PROCEDURE Handshake(host, port: ARRAY OF CHAR; VAR s: State): BOOLEAN;
 VAR
   privArr, pubArr, sharedArr: ARRAY 32 OF CHAR;
   i: LONGINT;
@@ -190,11 +196,13 @@ VAR
   rec, serverHelloMsg, serverPub, shared, th, serverFrag: TLSBytes.Buffer;
   cHsKey, cHsIV, sHsKey, sHsIV, cFinKey, sFinKey: TLSBytes.Buffer;
   hsSecret, masterSecret, clientFinishedRec, clientFinishedMsg, thServerFinished: TLSBytes.Buffer;
-  sawFinished, finishedOK: BOOLEAN;
+  sawFinished, finishedOK, zero: BOOLEAN;
   serverHSSeq, clientHSSeq: LONGINT;
+  why: ARRAY 128 OF CHAR;
 BEGIN
-  Init(s);
+  Init(s); lastError := "";
   TLS13EncHandshake.verbose := verbose;
+  TLS13EncHandshake.ResetState;
   TLS13EncHandshake.SetExpectedHost(host);
   IF ~Internet.Connect(host, port, s.fd) THEN RETURN FALSE END;
   s.connected := TRUE;
@@ -217,16 +225,19 @@ BEGIN
   IF ~TLS13Handshake.GetRecordPayload(rec, serverHelloMsg) THEN Out.String("TLS13Live: first server record is not plain handshake ServerHello"); Out.Ln; RETURN FALSE END;
   TLSBytes.Append(th, serverHelloMsg);
   DumpBuffer("server hello msg", serverHelloMsg);
-  IF ~TLS13Handshake.ExtractServerHelloKeyShare(serverHelloMsg, serverPub) THEN Out.String("TLS13Live: no x25519 keyshare in ServerHello"); Out.Ln; RETURN FALSE END;
+  IF ~TLS13Handshake.CheckServerHello(serverHelloMsg, clientRandom, serverPub, why) THEN Fail(why); RETURN FALSE END;  (* the session id we sent is clientRandom *)
   DumpBuffer("server pub", serverPub);
 
   i := 0; WHILE i < 32 DO privArr[i] := privArr[i]; INC(i) END;
   TLSX25519.ScalarMult(sharedArr, privArr, serverPub.data);
   CopyArrayToBuffer(sharedArr, 32, shared);
+  i := 0; zero := TRUE; WHILE i < 32 DO IF sharedArr[i] # 0X THEN zero := FALSE END; INC(i) END;
+  IF zero THEN Fail("the X25519 shared secret is zero (a small order point)"); RETURN FALSE END;  (* RFC 7748 6.1 *)
 
   TLS13Keys.HashMessages(th, clientRandom); (* reusing clientRandom as transcript hash *)
   TLS13Keys.HandshakeKeys(shared, clientRandom, cHsKey, cHsIV, sHsKey, sHsIV, cFinKey, sFinKey);
   TLS13Keys.HandshakeSecret(shared, hsSecret);
+  i := 0; WHILE i < 32 DO privArr[i] := 0X; sharedArr[i] := 0X; shared.data[i] := 0X; INC(i) END;  (* no longer needed *)
 
   serverHSSeq := 0;
   TLSBytes.Init(serverFrag);
@@ -234,7 +245,12 @@ BEGIN
   WHILE ~sawFinished DO
     IF ~NextNonCCS(s.fd, rec) THEN Out.String("TLS13Live: failed reading encrypted handshake record"); Out.Ln; RETURN FALSE END;
     DumpRecordInfo("encrypted server hs rec", rec);
-    IF ~TLS13EncHandshake.OpenServerHandshakeRecordBuf(sHsKey, sHsIV, serverHSSeq, rec, serverFrag, th, sFinKey, sawFinished, finishedOK) THEN Out.String("TLS13Live: decrypt/process encrypted server handshake failed at seq "); Out.Int(serverHSSeq, 0); Out.Ln; RETURN FALSE END;
+    IF ~TLS13EncHandshake.OpenServerHandshakeRecordBuf(sHsKey, sHsIV, serverHSSeq, rec, serverFrag, th, sFinKey, sawFinished, finishedOK) THEN
+      IF (TLS13EncHandshake.CapturedCertCount() > 0) & ~TLS13EncHandshake.CertificateVerifyOK() THEN Fail("CertificateVerify did not verify")
+      ELSE Fail("the encrypted handshake failed (decryption, order of messages or Finished)")
+      END;
+      RETURN FALSE
+    END;
     IF verbose THEN Out.String("  buffered hs fragment bytes="); Out.Int(serverFrag.len, 0); Out.Ln END;
     INC(serverHSSeq)
   END;
@@ -242,9 +258,7 @@ BEGIN
 
   IF verbose THEN Out.String("TLS13Live: server Finished OK, transcript len="); Out.Int(th.len, 0); Out.Ln END;
 
-  IF ~CheckCapturedCertificateChain(host) THEN
-    Out.String("TLS13Live: certificate hostname/trust check failed"); Out.Ln; RETURN FALSE
-  END;
+  IF ~CheckCapturedCertificateChain(host) THEN RETURN FALSE END;
 
   (* TLS 1.3 application traffic secrets are derived from the
      transcript ending at the server Finished.  The client Finished is
@@ -274,6 +288,17 @@ BEGIN
   TLSBytes.Init(s.pending); s.pendingPos := 0;
   s.handshakeDone := TRUE;
   RETURN TRUE
+END Handshake;
+
+(** a TLS 1.3 connection to host: the server authenticated (a trusted chain for the host name,
+  CertificateVerify and Finished); FALSE and nothing open otherwise (lastError says why) *)
+PROCEDURE Connect*(host, port: ARRAY OF CHAR; VAR s: State): BOOLEAN;
+BEGIN
+  IF Handshake(host, port, s) THEN RETURN TRUE END;
+  IF lastError = "" THEN COPY("no connection", lastError) END;
+  IF s.connected THEN Internet.Disconnect(s.fd) END;
+  Init(s);
+  RETURN FALSE
 END Connect;
 
 PROCEDURE Disconnect*(VAR s: State);

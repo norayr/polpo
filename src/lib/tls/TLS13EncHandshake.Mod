@@ -1,5 +1,5 @@
 MODULE TLS13EncHandshake;
-IMPORT Out := out, TLSBytes, TLS13Records, TLS13Keys, TLS13Finished, TLS13Certs, TLSX509, TLSX509Names;
+IMPORT Out := out, TLSBytes, TLS13Records, TLS13Keys, TLS13Finished, TLS13Certs, TLSX509, TLSX509Names, TLSSig;
 
 CONST
   EncryptedExtensions* = 8;
@@ -10,7 +10,14 @@ CONST
 VAR
   verbose*: BOOLEAN;  (** the handshake messages and the leaf certificate, for debugging *)
 
+TYPE
+  CertPtr = POINTER TO TLSX509.CertInfo;
+
 VAR
+  stage: LONGINT;      (* 0: expecting EncryptedExtensions, 1 Certificate, 2 CertificateVerify,
+                          3 Finished, 4 done (RFC 8446 2: no PSK, no client certificate) *)
+  cvOK: BOOLEAN;       (* the CertificateVerify signature verified *)
+  leaf: CertPtr;
   expectedHost: ARRAY 256 OF CHAR;
   expectedHostSet: BOOLEAN;
   capturedCerts: ARRAY 8 OF TLSBytes.Buffer;
@@ -39,6 +46,37 @@ BEGIN
     TLSBytes.Init(capturedCerts[i]); INC(i)
   END
 END ResetCapturedCerts;
+
+(** before a handshake: nothing seen yet *)
+PROCEDURE ResetState*;
+BEGIN
+  stage := 0; cvOK := FALSE; ResetCapturedCerts
+END ResetState;
+
+(** the server proved with CertificateVerify that it has the key of its certificate *)
+PROCEDURE CertificateVerifyOK*(): BOOLEAN;
+BEGIN
+  RETURN cvOK & (stage >= 3)
+END CertificateVerifyOK;
+
+(* the CertificateVerify msg: a signature, with the key of the leaf, over 64 spaces, the context
+   string, 0 and the transcript hash up to the Certificate (RFC 8446 4.4.3) *)
+PROCEDURE VerifyCertificateVerify(VAR msg, transcript: TLSBytes.Buffer): BOOLEAN;
+VAR th, content, sig: TLSBytes.Buffer; scheme, sigLen, i: LONGINT;
+BEGIN
+  IF (msg.len < 8) OR (capturedCertCount < 1) THEN RETURN FALSE END;
+  scheme := TLSBytes.GetBE16(msg, 4); sigLen := TLSBytes.GetBE16(msg, 6);
+  IF 8 + sigLen # msg.len THEN RETURN FALSE END;
+  TLSBytes.Slice(msg, 8, sigLen, sig);
+  TLS13Keys.HashMessages(transcript, th);
+  TLSBytes.Init(content);
+  i := 0; WHILE i < 64 DO TLSBytes.AppendByte(content, 20H); INC(i) END;
+  TLSBytes.AppendString(content, "TLS 1.3, server CertificateVerify");
+  TLSBytes.AppendByte(content, 0);
+  TLSBytes.Append(content, th);
+  IF leaf = NIL THEN NEW(leaf) END;
+  RETURN TLSX509.ParseCertificate(capturedCerts[0], leaf^) & TLSSig.VerifyScheme(scheme, leaf.spki, content, sig)
+END VerifyCertificateVerify;
 
 PROCEDURE CapturedCertCount*(): LONGINT;
 BEGIN
@@ -170,8 +208,24 @@ BEGIN
         IF verbose THEN Out.String("  hs msg type="); Out.Int(typ, 0); Out.String(" total="); Out.Int(total, 0); Out.String(" transcript before="); Out.Int(transcript.len, 0); Out.Ln END;
         TLSBytes.Slice(partial, pos, total, msg);
 
-        IF typ = Certificate THEN
-          DebugCertificateMessage(msg)
+        (* the order of RFC 8446 2; anything else (CertificateRequest too) ends the handshake *)
+        IF typ = EncryptedExtensions THEN
+          IF stage # 0 THEN RETURN FALSE END; stage := 1
+        ELSIF typ = Certificate THEN
+          IF (stage # 1) OR (msg.len < 5) OR (msg.data[4] # 0X) THEN RETURN FALSE END;  (* empty request context *)
+          DebugCertificateMessage(msg);
+          IF capturedCertCount < 1 THEN RETURN FALSE END;
+          stage := 2
+        ELSIF typ = CertificateVerify THEN
+          IF stage # 2 THEN RETURN FALSE END;
+          cvOK := VerifyCertificateVerify(msg, transcript);
+          IF verbose THEN Out.String("  CertificateVerify verified="); IF cvOK THEN Out.String("true") ELSE Out.String("false") END; Out.Ln END;
+          IF ~cvOK THEN RETURN FALSE END;
+          stage := 3
+        ELSIF typ = Finished THEN
+          IF stage # 3 THEN RETURN FALSE END; stage := 4
+        ELSE
+          RETURN FALSE
         END;
 
         IF typ = Finished THEN
@@ -235,5 +289,5 @@ BEGIN
 END BuildEmptyEncryptedExtensions;
 
 BEGIN
-  verbose := FALSE; ClearExpectedHost; ResetCapturedCerts
+  verbose := FALSE; leaf := NIL; ClearExpectedHost; ResetState
 END TLS13EncHandshake.

@@ -63,13 +63,12 @@ BEGIN
   Out.String("enc hs rec   = "); PrintBuffer(record); Out.Ln;
   SayResult((record.len > 5) & (ORD(record.data[0]) = TLS13Records.ApplicationData));
 
+  (* EncryptedExtensions and then Finished, without Certificate and CertificateVerify: refused
+     (RFC 8446 2: without a PSK the server must authenticate) *)
   TLSBytes.Copy(transcript0, transcriptAfter);
+  TLS13EncHandshake.ResetState;
   opened := TLS13EncHandshake.OpenServerHandshakeRecord(serverKey, serverIV, 0, record, transcriptAfter, serverFinKey, saw, ok);
-  Out.String("open server  = "); SayResult(opened);
-  Out.String("saw finished = "); SayResult(saw);
-  Out.String("finish valid = "); SayResult(ok);
-  Out.String("transcript n = "); Out.Int(transcriptAfter.len, 0); Out.Ln;
-  SayResult(transcriptAfter.len = 71);
+  Out.String("no certificate refused = "); SayResult(~opened & ~saw);
 
   opened := TLS13Records.OpenRecord(serverKey, serverIV, 0, record, innerType, plain);
   Out.String("inner type   = "); SayResult(opened & (innerType = TLS13Records.Handshake));
@@ -84,6 +83,7 @@ BEGIN
   TLSBytes.Copy(record, tampered);
   tampered.data[tampered.len - 1] := CHR((ORD(tampered.data[tampered.len - 1]) + 1) MOD 256);
   TLSBytes.Copy(transcript0, transcriptAfter);
+  TLS13EncHandshake.ResetState;
   opened := TLS13EncHandshake.OpenServerHandshakeRecord(serverKey, serverIV, 0, tampered, transcriptAfter, serverFinKey, saw, ok);
   Out.String("tamper rej   = "); SayResult(~opened);
 

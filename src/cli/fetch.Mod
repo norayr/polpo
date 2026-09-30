@@ -4,8 +4,9 @@ MODULE fetch;  (** HTTP downloads with the http module *)
    fetch.Show url         prints the body
    fetch.Verbose                   the TLS handshake in detail from now on (fetch.Quiet: not)
    url: http[s]://host[:port][/path]; host is a name, an IPv4 address or [an IPv6 address].
-   https is TLS 1.3 in Oberon (TLS_AES_128_GCM_SHA256, X25519): the server's Finished and the
-   host name are checked; the certificate chain and CertificateVerify are not enforced yet. *)
+   https is TLS 1.3 in Oberon (TLS_AES_128_GCM_SHA256, X25519): the certificate chain up to a
+   root of the CA bundle (SSL_CERT_FILE, else /etc/ssl/certs/ca-certificates.crt), the host
+   name, CertificateVerify and Finished are checked; the connection is refused otherwise. *)
 
 IMPORT Texts := texts, Files, http, httpsPure, TLS13Live, strTypes, out;
 

@@ -49,7 +49,9 @@ BEGIN
   IF (name.len > 2) & (name.data[0] = "*") & (name.data[1] = ".") THEN
     dot := 0;
     WHILE (dot < hn) & (host[dot] # ".") DO INC(dot) END;
-    IF (dot > 0) & (dot < hn - 1) THEN
+    i := 2; WHILE (i < name.len) & (name.data[i] # ".") DO INC(i) END;
+    (* the wildcard needs two labels after it (not *.com) *)
+    IF (dot > 0) & (dot < hn - 1) & (i < name.len - 1) THEN
       (* Host suffix after first dot must equal pattern after "*.". *)
       ok := (hn - dot - 1) = (name.len - 2);
       i := 2; j := dot + 1;

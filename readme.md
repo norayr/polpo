@@ -152,11 +152,15 @@ bin/x86/loksh fetch.Get https://example.com/ page.html # TLS 1.3
 ```
 
 HTTPS is TLS 1.3 written in Oberon (`src/lib/tls`, the modules of github.com/norayr/tls; only
-32 bit integers, so it runs on every port): X25519, AES-128-GCM, SHA-256, randomness from
-`/dev/urandom`, roots from `/etc/ssl/certs/ca-certificates.crt`. The server's Finished and the
-host name are checked, and chains of RSA certificates are verified; ECDSA certificates,
-CertificateVerify and refusing an untrusted chain are still to come. `fetch.Verbose` shows the
-handshake. `tools/fromvoc.py` copies a module of the tls repository with polpo's imports.
+32 bit integers, so it runs on every port): X25519, AES-128-GCM, SHA-256/384/512, randomness
+from `/dev/urandom`, roots from `$SSL_CERT_FILE` or `/etc/ssl/certs/ca-certificates.crt`. The
+connection is refused unless the certificate chain leads to one of those roots (RSA and ECDSA
+P-256/P-384 signatures, validity, CA and key usage constraints), the certificate is for the host
+name, CertificateVerify (ECDSA or RSA-PSS) verifies and the server's Finished is right; the
+ServerHello is checked strictly too (no downgrade, no HelloRetryRequest yet). `fetch.Verbose`
+shows the handshake. `tools/fromvoc.py` copies a module of the tls repository with polpo's
+imports; the tests are in `src/lib/tls/test` (`TLS_TEST_CERTS=src/lib/tls/test/certs loksh
+TLSTestChain.Run` and so on).
 
 `http`, `Internet`, `Sockets`, `DNS`, `strUtils` and `Base64` are the same files in voc
 (github.com/norayr: http, Internet, strutils, base64, branch polpo-compat), apart from their

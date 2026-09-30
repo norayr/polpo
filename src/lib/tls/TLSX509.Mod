@@ -52,6 +52,7 @@ VAR
   tmpPos: LONGINT;
   t: TLSASN1.TLV;
   ok: BOOLEAN;
+  outerAlg: TLSBytes.Buffer;
 BEGIN
   TLSBytes.Init(info.tbs);
   TLSBytes.Init(info.issuer);
@@ -139,8 +140,11 @@ BEGIN
   END;
 
   IF ok THEN
-    (* certificate.signatureAlgorithm.  Keep this OID too; usually same as TBS signature. *)
-    IF ~ParseAlgorithmIdentifier(der, certPos, certLimit, info.sigAlgOID) THEN ok := FALSE END
+    (* certificate.signatureAlgorithm: it must be the one inside the signed TBSCertificate
+       (RFC 5280, 4.1.1.2); the outer one is not signed *)
+    IF ~ParseAlgorithmIdentifier(der, certPos, certLimit, outerAlg) THEN ok := FALSE
+    ELSIF ~TLSBytes.EqualConstTime(outerAlg, info.sigAlgOID) THEN ok := FALSE
+    END
   END;
 
   IF ok THEN
@@ -156,6 +160,7 @@ BEGIN
       END
     END
   END;
+  IF ok & (certPos # certLimit) THEN ok := FALSE END;  (* nothing after the signature *)
 
   RETURN ok
 END ParseCertificate;

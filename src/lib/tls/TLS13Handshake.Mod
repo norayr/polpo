@@ -71,18 +71,17 @@ END MakeSupportedVersions;
 PROCEDURE MakeSignatureAlgorithms(VAR extData: TLSBytes.Buffer);
 BEGIN
   TLSBytes.Init(extData);
-  (*
-     Offer the common TLS 1.3 certificate signature schemes.
-     The first live version offered only rsa_pss_rsae_sha256, which can make
-     real servers with ECDSA certificates abort before ServerHello.
-  *)
-  TLSBytes.PutBE16(extData, 12);
+  (* the schemes TLSSig verifies: ECDSA and RSA-PSS for CertificateVerify; RSA PKCS#1 v1.5 only
+     for certificates (without signature_algorithms_cert this list covers both, RFC 8446 4.2.3) *)
+  TLSBytes.PutBE16(extData, 16);
   TLSBytes.AppendByte(extData, 4); TLSBytes.AppendByte(extData, 3);  (* ecdsa_secp256r1_sha256 *)
+  TLSBytes.AppendByte(extData, 5); TLSBytes.AppendByte(extData, 3);  (* ecdsa_secp384r1_sha384 *)
   TLSBytes.AppendByte(extData, 8); TLSBytes.AppendByte(extData, 4);  (* rsa_pss_rsae_sha256 *)
   TLSBytes.AppendByte(extData, 8); TLSBytes.AppendByte(extData, 5);  (* rsa_pss_rsae_sha384 *)
   TLSBytes.AppendByte(extData, 8); TLSBytes.AppendByte(extData, 6);  (* rsa_pss_rsae_sha512 *)
   TLSBytes.AppendByte(extData, 4); TLSBytes.AppendByte(extData, 1);  (* rsa_pkcs1_sha256 *)
-  TLSBytes.AppendByte(extData, 5); TLSBytes.AppendByte(extData, 1)   (* rsa_pkcs1_sha384 *)
+  TLSBytes.AppendByte(extData, 5); TLSBytes.AppendByte(extData, 1);  (* rsa_pkcs1_sha384 *)
+  TLSBytes.AppendByte(extData, 6); TLSBytes.AppendByte(extData, 1)   (* rsa_pkcs1_sha512 *)
 END MakeSignatureAlgorithms;
 
 PROCEDURE MakeSupportedGroups(VAR extData: TLSBytes.Buffer);
@@ -200,6 +199,63 @@ BEGIN
   END;
   RETURN FALSE
 END ExtractServerHelloKeyShare;
+
+(** the ServerHello msg answers our ClientHello (with session id sid) the way RFC 8446 requires:
+  TLS 1.3 (supported_versions 0x0304), TLS_AES_128_GCM_SHA256, no compression, our session id
+  echoed, an X25519 key share (in pubKey), no extension we did not offer, none twice; a
+  HelloRetryRequest is not accepted. why: the reason when FALSE *)
+PROCEDURE CheckServerHello*(VAR msg, sid, pubKey: TLSBytes.Buffer; VAR why: ARRAY OF CHAR): BOOLEAN;
+VAR pos, extEnd, et, el, i, keyLen: LONGINT; hrr: BOOLEAN; sawVersions, sawKeyShare: BOOLEAN; r: TLSBytes.Buffer;
+BEGIN
+  TLSBytes.Init(pubKey); COPY("malformed ServerHello", why);
+  IF (msg.len < 4 + 2 + 32 + 1) OR (ORD(msg.data[0]) # ServerHello) OR (TLSBytes.GetBE24(msg, 1) # msg.len - 4) THEN RETURN FALSE END;
+  IF (ORD(msg.data[4]) # LegacyMajor) OR (ORD(msg.data[5]) # LegacyMinor) THEN RETURN FALSE END;
+  TLSBytes.Slice(msg, 6, 32, r);
+  (* SHA-256("HelloRetryRequest") *)
+  hrr := (r.data[0] = 0CFX) & (r.data[1] = 21X) & (r.data[2] = 0ADX) & (r.data[3] = 74X) & (r.data[4] = 0E5X) &
+    (r.data[5] = 9AX) & (r.data[6] = 61X) & (r.data[7] = 11X) & (r.data[31] = 9CX);
+  IF hrr THEN COPY("the server asks for a HelloRetryRequest (not supported)", why); RETURN FALSE END;
+  (* a TLS 1.2 or older server marks the random (RFC 8446 4.1.3): a downgrade *)
+  IF (r.data[24] = 44X) & (r.data[25] = 4FX) & (r.data[26] = 57X) & (r.data[27] = 4EX) & (r.data[28] = 47X) &
+     (r.data[29] = 52X) & (r.data[30] = 44X) THEN COPY("the server does not speak TLS 1.3 (downgrade marker)", why); RETURN FALSE END;
+  pos := 38;
+  IF (ORD(msg.data[pos]) # sid.len) OR (pos + 1 + sid.len + 3 + 2 > msg.len) THEN COPY("session id not echoed", why); RETURN FALSE END;
+  i := 0;
+  WHILE i < sid.len DO IF msg.data[pos + 1 + i] # sid.data[i] THEN COPY("session id not echoed", why); RETURN FALSE END; INC(i) END;
+  INC(pos, 1 + sid.len);
+  IF (ORD(msg.data[pos]) # CipherTLSAES128GCMSHA256Hi) OR (ORD(msg.data[pos+1]) # CipherTLSAES128GCMSHA256Lo) THEN
+    COPY("cipher suite not offered", why); RETURN FALSE
+  END;
+  IF ORD(msg.data[pos + 2]) # 0 THEN RETURN FALSE END;
+  INC(pos, 3);
+  IF TLSBytes.GetBE16(msg, pos) + pos + 2 # msg.len THEN RETURN FALSE END;
+  extEnd := msg.len; INC(pos, 2);
+  sawVersions := FALSE; sawKeyShare := FALSE;
+  WHILE pos < extEnd DO
+    IF pos + 4 > extEnd THEN RETURN FALSE END;
+    et := TLSBytes.GetBE16(msg, pos); el := TLSBytes.GetBE16(msg, pos + 2); INC(pos, 4);
+    IF pos + el > extEnd THEN RETURN FALSE END;
+    IF et = ExtSupportedVersions THEN
+      IF sawVersions OR (el # 2) OR (ORD(msg.data[pos]) # TLS13Major) OR (ORD(msg.data[pos+1]) # TLS13Minor) THEN
+        COPY("not TLS 1.3", why); RETURN FALSE
+      END;
+      sawVersions := TRUE
+    ELSIF et = ExtKeyShare THEN
+      IF sawKeyShare OR (el # 36) OR (ORD(msg.data[pos]) # GroupX25519Hi) OR (ORD(msg.data[pos+1]) # GroupX25519Lo) THEN
+        COPY("key share not X25519", why); RETURN FALSE
+      END;
+      keyLen := TLSBytes.GetBE16(msg, pos + 2);
+      IF keyLen # 32 THEN RETURN FALSE END;
+      TLSBytes.Slice(msg, pos + 4, 32, pubKey); sawKeyShare := TRUE
+    ELSE
+      COPY("an extension we did not offer", why); RETURN FALSE
+    END;
+    INC(pos, el)
+  END;
+  IF ~sawVersions THEN COPY("not TLS 1.3 (no supported_versions)", why); RETURN FALSE END;
+  IF ~sawKeyShare THEN COPY("no key share", why); RETURN FALSE END;
+  RETURN TRUE
+END CheckServerHello;
 
 PROCEDURE IsPlainHandshakeRecord*(VAR record: TLSBytes.Buffer): BOOLEAN;
 BEGIN
