@@ -806,17 +806,19 @@ END PutTrap;
       IF zeroTrap THEN PutTGE( 0, y.reg, ZeroTrap) END;  (* result only defined for y>0 *)
       IF rt = y.reg THEN rt:=-1; GetR(TempReg, rt); ReleaseR(y.reg) END;
       ASSERT(rt # y.reg);  (* should always be TRUE *)
+      (* polpo: T2 as the scratch register, not T1: T1 is RRI, so RETURN x MOD y and RETURN x DIV y
+         (rt = RRI) destroyed the correction before adding it (DIV: the sign; MOD: the result) *)
       PutR( MFHI, rt, 0, 0);
-      PutR( SRA+31*SHAMT, T1, 0, rt);
-      PutR( AND, T1, T1, y.reg);
-      PutR( ADDU, rt, rt, T1);  
+      PutR( SRA+31*SHAMT, T2, 0, rt);
+      PutR( AND, T2, T2, y.reg);
+      PutR( ADDU, rt, rt, T2);  
     ELSE
-      PutR( SRA+31*SHAMT, T1, 0, x.reg);
-      PutR( SUBU, T0, x.reg, T1);
+      PutR( SRA+31*SHAMT, T2, 0, x.reg);
+      PutR( SUBU, T0, x.reg, T2);
       PutR( dIV, 0, T0, y.reg);
       IF zeroTrap THEN PutTGE( 0, y.reg, ZeroTrap) END;  (* result only defined for y>0 *)
       PutR( MFLO, rt, 0, 0); 
-      PutR( ADDU, rt, rt, T1);
+      PutR( ADDU, rt, rt, T2);
     END;
     x.reg := rt
   END Div;

@@ -496,8 +496,10 @@ CONST
           MakeConstItem(c,eltyp.size,OBT.linttyp);
           load(c);
           IF (x.mode = OC.Var) OR (x.mode = OC.Var1) THEN
-            IF x.r IN {OBC.FP, OBC.PC, OBC.SP} THEN 
-              OBC.GetReg(reg); IF x.r = OBC.PC THEN x.a:=x.a-(OBC.pc*4 + 8) END
+            IF x.r IN {OBC.FP, OBC.PC, OBC.SP} THEN
+              (* polpo: the ADD that reads PC comes after the MUL, one instruction later: + 12, not + 8
+                 (global arrays of records whose size is not a power of 2 were read 4 bytes off) *)
+              OBC.GetReg(reg); IF x.r = OBC.PC THEN x.a:=x.a-(OBC.pc*4 + 12) END
             ELSE
               reg:=x.r 
             END;
