@@ -660,7 +660,7 @@ END LineLoop;
 
 PROCEDURE Run*;
 VAR
-  saved: nTermios.Termios;
+  saved, reading, running: nTermios.Termios;
   buf: ARRAY 256 OF CHAR;
   arg: ARRAY 256 OF CHAR;
   cmd, name: ARRAY 64 OF CHAR;
@@ -689,7 +689,7 @@ BEGIN
       nOut.Ln;
       nOut.String("Interactive keys:"); nOut.Ln;
       nOut.String("  Tab     complete module name or procedure name"); nOut.Ln;
-      nOut.String("  Ctrl+C  cancel current line"); nOut.Ln;
+      nOut.String("  Ctrl+C  cancel current line (while a command runs: stop loksh)"); nOut.Ln;
       nOut.String("  Ctrl+D  exit"); nOut.Ln;
       nOut.String("  quit / exit"); nOut.Ln;
        Kernel.Shutdown(0)
@@ -719,10 +719,15 @@ BEGIN
       LineLoop;
       Kernel.Shutdown(0)
     END;
+    (* reading a line: Ctrl+C is a key (cancel the line); running a command: Ctrl+C stops loksh,
+       and Kernel restores the terminal through termios *)
+    r := nTermios.Get(0, running); reading := running; EXCL(reading.lflag, nTermios.ISIG);
     quit := FALSE;
     WHILE ~quit DO
       nOut.String("> ");
+      r := nTermios.Set(0, reading);
       ReadLine(buf, len, quit);
+      r := nTermios.Set(0, running);
       IF ~quit & (len > 0) THEN
         IF ooc2Strings.Equal(buf, "quit") OR ooc2Strings.Equal(buf, "exit") THEN
           quit := TRUE

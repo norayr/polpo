@@ -323,15 +323,21 @@ PROCEDURE^ GC*;
     
 (** Shutdown - Terminate Oberon after executing all module terminators.  If code = 0, perform a soft reboot. *)
 
-PROCEDURE Shutdown*(code: LONGINT);
-VAR h: Proc;  t: LONGINT; m: Module;
+(* the termination handlers of all modules, each once (termios restores the terminal) *)
+PROCEDURE Terminate;
+VAR h: Proc; m: Module;
 BEGIN
   m:= modules;
-(* no termination tested in this version *)
   WHILE (m#NIL) DO
     IF m.term # NIL THEN h := m.term; m.term := NIL;  h  END;
     m := m.next;
-  END;
+  END
+END Terminate;
+
+PROCEDURE Shutdown*(code: LONGINT);
+VAR t: LONGINT;
+BEGIN
+  Terminate;
   WHILE (modules#NIL) & (modules.name#"Objects") DO
     modules := modules.next;
   END;
@@ -567,7 +573,7 @@ BEGIN
     SC.regs[Linux0.SP*Linux0.RegDist]:= StackOrg;
 (*    SC.regs[Linux0.FP*Linux0.RegDist]:= StackOrg;*)
     SC.pc:=SYSTEM.VAL( LONGINT, loop);
-    IF loop=NIL THEN Linux0.Exit0( 1) END;
+    IF loop=NIL THEN Terminate; Linux0.Exit0( 1) END;  (* polpo: the terminal restored, as on x86 and ARM *)
   END;
   DEC( siglevel);
 END SignalHandler;
