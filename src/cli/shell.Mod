@@ -106,8 +106,49 @@ BEGIN
   RETURN nofCmds
 END ArmSeekCmds;
 
+(* Position rider at start of CmdBlk of a ROP2 object file (ARMv7 FBX, RISC-V FDX, MIPS F9X,
+   after the tag), as Modules0.LoadModule of src/cli/rop2 reads it; returns nofCmds, or -1. *)
+PROCEDURE Rop2SeekCmds(VAR R: Files.Rider): INTEGER;
+VAR
+  tag, ch: CHAR;
+  n, nofImps, nofMeth, nofPtr, bmno: LONGINT;
+  nofExp, nofDesc, nofCmds, nofPtrs: INTEGER;
+  s: ARRAY 64 OF CHAR;
+  i: LONGINT;
+BEGIN
+  Files.Read(R, tag); IF tag # "6" THEN RETURN -1 END;
+  Files.ReadLInt(R, n);  (* refsize *)
+  Files.ReadInt(R, nofExp); Files.ReadInt(R, nofDesc); Files.ReadInt(R, nofCmds); Files.ReadInt(R, nofPtrs);
+  Files.ReadNum(R, nofImps);
+  i := 0; WHILE i < 7 DO Files.ReadNum(R, n); INC(i) END;  (* links, data, const and code size *)
+  Files.ReadString(R, s);  (* module name *)
+  Files.Read(R, tag); IF tag # 081X THEN RETURN -1 END;  (* imports *)
+  i := 0; WHILE i < nofImps DO Files.ReadString(R, s); INC(i) END;
+  Files.Read(R, tag); IF tag # 082X THEN RETURN -1 END;  (* exports *)
+  Files.Read(R, ch);
+  WHILE (ch # 0X) & ~R.eof DO
+    IF ch = 8X THEN  (* a type descriptor *)
+      Files.ReadString(R, s); IF s = "" THEN Files.ReadNum(R, n) END;
+      Files.ReadNum(R, n); Files.ReadNum(R, n); Files.ReadNum(R, bmno);  (* link, size, base *)
+      IF bmno >= 0 THEN Files.ReadString(R, s); IF s = "" THEN Files.ReadNum(R, n) END END;
+      Files.ReadNum(R, n); Files.ReadNum(R, n);  (* methods, inherited *)
+      Files.ReadNum(R, nofMeth); Files.ReadNum(R, nofPtr);
+      i := 0; WHILE i < 2 * nofMeth DO Files.ReadNum(R, n); INC(i) END;
+      i := 0; WHILE i < nofPtr DO Files.ReadNum(R, n); INC(i) END
+    ELSIF ch = 9X THEN Files.ReadNum(R, n); Files.ReadNum(R, n)  (* a link *)
+    ELSE
+      Files.ReadString(R, s); Files.ReadNum(R, n);  (* name, fingerprint *)
+      IF (ch = 3X) OR (ch = 4X) OR (ch = 6X) THEN Files.ReadNum(R, n) END
+    END;
+    Files.Read(R, ch)
+  END;
+  Files.Read(R, tag); IF tag # 083X THEN RETURN -1 END;  (* commands *)
+  cmdAdrSize := 0;  (* a compact number *)
+  RETURN nofCmds
+END Rop2SeekCmds;
+
 (* Position rider at start of CmdBlk; returns nofCmds, or -1 on error.
-   Understands x86 (BBX AFX) and ARM (F5X "0") object files. *)
+   Understands x86 (BBX AFX), ARM (F5X "0") and ROP2 (F9X, FBX, FDX "6") object files. *)
 PROCEDURE ObjSeekCmds(VAR R: Files.Rider): INTEGER;
 VAR
   tag: CHAR;
@@ -118,6 +159,7 @@ VAR
 BEGIN
   Files.Read(R, tag);
   IF tag = 0F5X THEN RETURN ArmSeekCmds(R) END;
+  IF (tag = 0F9X) OR (tag = 0FAX) OR (tag = 0FBX) OR (tag = 0FDX) THEN RETURN Rop2SeekCmds(R) END;
   IF tag # 0BBX THEN RETURN -1 END;
   Files.Read(R, tag); IF tag # 0AFX THEN RETURN -1 END;
   cmdAdrSize := 2;
@@ -142,7 +184,10 @@ PROCEDURE ObjReadCmd(VAR R: Files.Rider; VAR name: ARRAY OF CHAR);
 VAR n: LONGINT;
 BEGIN
   ObjReadStr(R, name);
-  IF cmdAdrSize = 4 THEN Files.ReadLInt(R, n) ELSE ObjReadU16(R, n) END
+  IF cmdAdrSize = 4 THEN Files.ReadLInt(R, n)
+  ELSIF cmdAdrSize = 0 THEN Files.ReadNum(R, n)
+  ELSE ObjReadU16(R, n)
+  END
 END ObjReadCmd;
 
 (* Object file name of module modname in the loader's object directory. *)

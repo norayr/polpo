@@ -47,6 +47,7 @@ IMPORT SYSTEM;
 CONST
   ARCH*="X86";
   ObjPrefix*="x86/";
+  StatModeOfs* = 16;  (** the offset of st_mode in Status (struct stat64) *)
   ObjTag*=0AFX;  (* x86: 0AFX; arml: 0F5X; arm: 36FBH; mips: 36F9H; mipst: 36FAH *)
   RegSize*=32;
   PageSize*=1000H;

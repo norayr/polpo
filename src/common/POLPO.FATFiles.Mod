@@ -161,7 +161,7 @@ VAR
   pos, reclen: LONGINT;
   reclenI: INTEGER;
   dtype: CHAR;
-  buf: ARRAY BufSize OF SYSTEM.BYTE;
+  buf: ARRAY BufSize DIV 4 OF LONGINT;  (* word aligned: d_reclen is read as 16 bits (MIPS traps otherwise) *)
   name: ARRAY 256 OF CHAR;
   fullPath: ARRAY 512 OF CHAR;
   dir: ARRAY 256 OF CHAR;
@@ -219,7 +219,7 @@ BEGIN
           IF sres = 0 THEN
             size := st.size;
             UnixToOberon(st.mtime, time, date);
-            SYSTEM.GET(SYSTEM.ADR(st) + 16, mode);
+            SYSTEM.GET(SYSTEM.ADR(st) + Linux0.StatModeOfs, mode);
             attr := ModeToAttr(mode)
           ELSE
             (* stat failed: fall back to d_type for attr, zero size/time *)
