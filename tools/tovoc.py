@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # tovoc.py polpo-file voc-file: a module shared with voc, with the imports of voc.
-# The shared modules (the voc repositories on github.com/norayr, branch polpo-compat):
+# The shared modules (the voc repositories on github.com/norayr, main, master for Internet):
 #   src/lib/sockets/Sockets.Mod, src/lib/dns/DNS.Mod, src/lib/internet/Internet.Mod -> Internet
 #   src/lib/strutils/strUtils.Mod, strTypes.Mod -> strutils
 #   src/lib/base64/Base64.Mod -> base64

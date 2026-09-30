@@ -163,7 +163,7 @@ imports; the tests are in `src/lib/tls/test` (`TLS_TEST_CERTS=src/lib/tls/test/c
 TLSTestChain.Run` and so on).
 
 `http`, `Internet`, `Sockets`, `DNS`, `strUtils` and `Base64` are the same files in voc
-(github.com/norayr: http, Internet, strutils, base64, branch polpo-compat), apart from their
+(github.com/norayr: http, Internet, strutils, base64: main, master for Internet), apart from their
 import lines; `tools/tovoc.py` writes the voc version of a file.
 
 ### xxs, a console editor
