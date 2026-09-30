@@ -7,7 +7,9 @@ MODULE CompilerTest;  (** loksh CompilerTest.Run: code generator bugs fixed in p
    MIPS: RETURN x DIV y, RETURN x MOD y, RETURN ODD(...);
    RISC-V: b := i = 5 destroyed i;
    ROP2 (RISC-V, MIPS, ARMv7): a record copy from a VAR parameter at an offset beyond the
-   immediate range; 8 VAR record arguments in a frame over 512 KB. *)
+   immediate range; 8 VAR record arguments in a frame over 512 KB;
+   RISC-V, MIPS: the end of a block move loop computed from a register reused for its length
+   (w.cur := w.issuer copied nothing, or ran over memory). *)
 
 IMPORT out;
 
@@ -16,6 +18,8 @@ TYPE
   N = RECORD len: LONGINT; d: ARRAY 280 OF LONGINT END;
   M = RECORD m: N; minv: LONGINT; r2: N; one: N END;  (* one at offset 2252 *)
   Big = RECORD len: LONGINT; data: ARRAY 32768 OF CHAR END;
+  Info = RECORD a, b, c, d, e, f, g, h: Big; bits: LONGINT END;  (* as TLSX509.CertInfo *)
+  Work = POINTER TO RECORD cur, issuer: Info END;
 
 VAR
   fails, checks: LONGINT;
@@ -55,6 +59,14 @@ BEGIN
   Check("8 VAR records in a 512 KB frame", (a.len = 1) & (i.len = 8))
 END Frame;
 
+PROCEDURE BlockMove;
+VAR w: Work;
+BEGIN
+  NEW(w); w.issuer.h.data[3] := "B"; w.issuer.bits := 5; w.cur.h.data[3] := "-";
+  w.cur := w.issuer;
+  Check("w.cur := w.issuer, 256 KB on the heap", (w.cur.h.data[3] = "B") & (w.cur.bits = 5))
+END BlockMove;
+
 PROCEDURE Run*;
 VAR i, j, k, bit, x: LONGINT; arr: ARRAY 20 OF LONGINT; a, r: N; mm: M;
 BEGIN
@@ -77,6 +89,7 @@ BEGIN
   mm.one.len := 7; r.len := 0; CopyOne(a, 0, 1, mm, r);
   Check("record copy from a VAR parameter at offset 2252", r.len = 7);
   Frame;
+  BlockMove;
   out.String("CompilerTest: "); out.Int(checks, 0); out.String(" checks, "); out.Int(fails, 0); out.String(" failed"); out.Ln
 END Run;
 

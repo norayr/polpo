@@ -666,7 +666,7 @@ MODULE VOPC;  (* RC 14.3.90 / 11.2.94 *)  (* object model 29.4.93 *)
         OPL.Move(xadr, x, OPL.LInt); rx := OPL.T1;
         OPL.Move(yadr, y, OPL.LInt); ry := OPL.T2;
         len.mode := OPL.Con; len.offset := 4*(s DIV 4); 
-        OPL.Add(len, x, -1, FALSE); until := len.reg;
+        OPL.Add(len, xadr, -1, FALSE); until := len.reg;  (* polpo: xadr, the register of x may be reused for len *)
         OPL.PutI(OPL.LW, OPL.T0, OPL.T2, 0);
         OPL.PutI(OPL.ADDI, OPL.T2, OPL.T2, 4);
         OPL.PutS(OPL.SW, OPL.T0, OPL.T1, 0);

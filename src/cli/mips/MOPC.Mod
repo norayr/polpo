@@ -764,7 +764,7 @@ MODULE MOPC;  (* RC 14.3.90 / 11.2.94 *)  (* object model 29.4.93 *)
           OPL.Move(xadr, x, LInt); rx := T1;
           OPL.Move(yadr, y, LInt); ry := T2;
           len.mode := Con; len.offset := 8*(s DIV 8); 
-          OPL.Add(len, y, -1, FALSE); until := len.reg;
+          OPL.Add(len, yadr, -1, FALSE); until := len.reg;  (* polpo: yadr, the register of y may be reused for len *)
           (* loop: *) LdW(T2, T0, 0, uy, n); StW(T1, T0, 0, ux, n);
           LdW(T2, T0, 4, uy, n); StW(T1, T0, 4, ux, n);
           OPL.Put(ADDIU*OP + T2*(RS + RT) + 8); INC(n);
@@ -793,7 +793,7 @@ MODULE MOPC;  (* RC 14.3.90 / 11.2.94 *)  (* object model 29.4.93 *)
           OPL.Move(xadr, x, LInt); rx := T1;
           OPL.Move(yadr, y, LInt); ry := T2;
           len.mode := Con; len.offset := 12*(s DIV 12); 
-          OPL.Add(len, y, -1, FALSE); until := len.reg;
+          OPL.Add(len, yadr, -1, FALSE); until := len.reg;  (* polpo: yadr, as above *)
           OPL.Put(LW*OP + T2*RS + T0*RT);
           OPL.Put(ADDIU*OP + T2*(RS + RT) + 12);
           OPL.Put(SW*OP + T1*RS + T0*RT);
