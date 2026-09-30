@@ -6,7 +6,9 @@ MODULE fetch;  (** HTTP downloads with the http module *)
    url: http[s]://host[:port][/path]; host is a name, an IPv4 address or [an IPv6 address].
    https is TLS 1.3 in Oberon (TLS_AES_128_GCM_SHA256, X25519): the certificate chain up to a
    root of the CA bundle (SSL_CERT_FILE, else /etc/ssl/certs/ca-certificates.crt), the host
-   name, CertificateVerify and Finished are checked; the connection is refused otherwise. *)
+   name, CertificateVerify and Finished are checked; the connection is refused otherwise.
+   An incomplete body (shorter than its length, no last chunk, or a TLS connection that ended
+   without close_notify) is not saved. *)
 
 IMPORT Texts := texts, Files, http, httpsPure, TLS13Live, strTypes, out;
 
@@ -64,6 +66,7 @@ BEGIN
   IF ~Fetch(url, h) THEN RETURN END;
   IF h.rspnFirstLine = NIL THEN out.String("fetch: no answer from the server"); out.Ln; RETURN END;
   out.String(h.rspnFirstLine^); out.String(", "); out.Int(h.rspnContentLength, 0); out.String(" bytes");
+  IF ~h.rspnComplete THEN out.String(", incomplete: not saved"); out.Ln; RETURN END;
   IF Texts.Arg(A, name) THEN
     f := Files.New(name);
     IF f = NIL THEN out.String(", cannot create "); out.String(name)
@@ -99,7 +102,8 @@ BEGIN
   WHILE i < h.rspnContentLength DO
     IF h.rspnBody[i] # 0DX THEN out.Char(h.rspnBody[i]) END;  (* out.Char(0DX) is a line end *)
     INC(i)
-  END
+  END;
+  IF ~h.rspnComplete THEN out.Ln; out.String("fetch: the body is incomplete"); out.Ln END
 END Show;
 
 END fetch.

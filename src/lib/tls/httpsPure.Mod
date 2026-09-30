@@ -20,8 +20,9 @@ TYPE
 PROCEDURE init(VAR h: TLSClient);
 BEGIN
   (* Pure Oberon TLS state is initialized in Connect.  crtpath is kept for
-     compatibility with the old mbedtls-based https module.  Certificate
-     verification is not implemented yet. *)
+     compatibility with the old mbedtls-based https module; the CA bundle is
+     SSL_CERT_FILE or TLSCABundle.DefaultPath, and TLS13Live refuses a server
+     it cannot verify. *)
 END init;
 
 PROCEDURE setcertpath(VAR h: TLSClient; path: ARRAY OF CHAR);
@@ -87,7 +88,8 @@ BEGIN
       END;
       buf[got] := 0X
     END;
-    h^.connectionFlag := ok
+    h^.connectionFlag := ok;
+    IF ~ok THEN h^.endClean := t.tls.closeNotify END  (* the end: proper only with close_notify *)
   ELSE
     Out.String("httpsPure client is not initialized with pure tls socket"); Out.Ln;
     HALT(100)
@@ -102,7 +104,8 @@ BEGIN
     max := haveRead;
     IF max < 0 THEN max := LEN(buf) END;
     IF max > LEN(buf) THEN max := LEN(buf) END;
-    h^.connectionFlag := TLS13Live.ReadAppMax(h^.trn(PureTLSSocket).tls, buf, max, haveRead)
+    h^.connectionFlag := TLS13Live.ReadAppMax(h^.trn(PureTLSSocket).tls, buf, max, haveRead);
+    IF ~h^.connectionFlag THEN h^.endClean := h^.trn(PureTLSSocket).tls.closeNotify END
   ELSE
     Out.String("httpsPure client is not initialized with pure tls socket"); Out.Ln;
     HALT(100)

@@ -1,9 +1,12 @@
 MODULE TLSECDSA;
 (* ECDSA signature verification over NIST P-256 and P-384 (FIPS 186-4, SEC 1), for certificates
-   and CertificateVerify. Field arithmetic modulo p and n in Montgomery form with TLSNum (32 bit
-   integers only); Jacobian coordinates with the a = -3 doubling (dbl-2001-b) and add-2007-bl;
-   u1*G + u2*Q in one pass (Shamir). Verification only: nothing here is secret, so no care is
-   taken about timing. *)
+   and CertificateVerify, and ECDH (SEC 1 3.3.1) for a TLS key share. Field arithmetic modulo p
+   and n in Montgomery form with TLSNum (32 bit integers only); Jacobian coordinates with the
+   a = -3 doubling (dbl-2001-b) and add-2007-bl; u1*G + u2*Q in one pass (Shamir).
+   Verification uses only public values. ECDH uses a Montgomery ladder whose steps do not depend
+   on the bits of the scalar (a swap by arithmetic, not a branch), but the field arithmetic is
+   not constant time; the scalar is an ephemeral key used once, which timing attacks (they need
+   many runs with one key) cannot exploit. *)
 IMPORT TLSBytes, TLSNum;
 
 CONST
@@ -154,21 +157,29 @@ BEGIN
   RETURN TLSNum.Compare(v, mod.m) < 0
 END Scalar;
 
+(* q := the point pub (04 x y, uncompressed), FALSE unless it is a point of the curve (not the
+   point at infinity; the cofactor is 1, so every such point has order n) *)
+PROCEDURE ParsePoint(VAR c: Curve; VAR pub: TLSBytes.Buffer; VAR q: Point): BOOLEAN;
+VAR x, y: Num; n: LONGINT;
+BEGIN
+  n := c.bytes;
+  IF (pub.len # 1 + 2 * n) OR (pub.data[0] # 4X) THEN RETURN FALSE END;
+  TLSNum.FromBytes(pub.data, 1, n, c.p.m.len, x);
+  TLSNum.FromBytes(pub.data, 1 + n, n, c.p.m.len, y);
+  IF (TLSNum.Compare(x, c.p.m) >= 0) OR (TLSNum.Compare(y, c.p.m) >= 0) THEN RETURN FALSE END;
+  TLSNum.ToMont(x, c.p, q.x); TLSNum.ToMont(y, c.p, q.y);
+  TLSNum.MontOne(c.p, q.z); q.inf := FALSE;
+  RETURN OnCurve(c, q.x, q.y)
+END ParsePoint;
+
 (** the signature (r, s) of the hash by the public key pub (04 x y, uncompressed) on the curve *)
 PROCEDURE Verify*(curve: LONGINT; VAR pub, hash, r, s: TLSBytes.Buffer): BOOLEAN;
 VAR
-  e, rn, sn, w, u1, u2, t, x, y, zinv, z2: Num; q, res: Point; eb: TLSBytes.Buffer; n: LONGINT;
+  e, rn, sn, w, u1, u2, t, x, zinv, z2: Num; q, res: Point; eb: TLSBytes.Buffer; n: LONGINT;
 BEGIN
   IF (curve # P256) & (curve # P384) THEN RETURN FALSE END;
   n := curves[curve].bytes;
-  (* the public key *)
-  IF (pub.len # 1 + 2 * n) OR (pub.data[0] # 4X) THEN RETURN FALSE END;
-  TLSNum.FromBytes(pub.data, 1, n, curves[curve].p.m.len, x);
-  TLSNum.FromBytes(pub.data, 1 + n, n, curves[curve].p.m.len, y);
-  IF (TLSNum.Compare(x, curves[curve].p.m) >= 0) OR (TLSNum.Compare(y, curves[curve].p.m) >= 0) THEN RETURN FALSE END;
-  TLSNum.ToMont(x, curves[curve].p, q.x); TLSNum.ToMont(y, curves[curve].p, q.y);
-  TLSNum.MontOne(curves[curve].p, q.z); q.inf := FALSE;
-  IF ~OnCurve(curves[curve], q.x, q.y) THEN RETURN FALSE END;
+  IF ~ParsePoint(curves[curve], pub, q) THEN RETURN FALSE END;
   (* 0 < r, s < n *)
   IF ~Scalar(r, curves[curve].n, n, rn) OR ~Scalar(s, curves[curve].n, n, sn) THEN RETURN FALSE END;
   IF TLSNum.IsZero(rn) OR TLSNum.IsZero(sn) THEN RETURN FALSE END;
@@ -225,6 +236,96 @@ BEGIN
   IF ~Length(len) OR (pos + len # der.len) THEN RETURN FALSE END;
   RETURN Integer(r) & Integer(s) & (pos = der.len)
 END ParseSignature;
+
+(* ----- ECDH ----- *)
+
+(* a, b := b, a if bit = 1 (0: unchanged), by arithmetic on the limbs; a.len = b.len *)
+PROCEDURE SwapNum(VAR a, b: Num; bit: LONGINT);
+VAR i, t: LONGINT;
+BEGIN
+  i := 0;
+  WHILE i < a.len DO
+    t := (b.d[i] - a.d[i]) * bit; a.d[i] := a.d[i] + t; b.d[i] := b.d[i] - t; INC(i)
+  END
+END SwapNum;
+
+PROCEDURE Swap(VAR p, q: Point; bit: LONGINT);
+VAR a, b, t: LONGINT;
+BEGIN
+  SwapNum(p.x, q.x, bit); SwapNum(p.y, q.y, bit); SwapNum(p.z, q.z, bit);
+  a := 0; IF p.inf THEN a := 1 END;
+  b := 0; IF q.inf THEN b := 1 END;
+  t := (b - a) * bit; a := a + t; b := b - t;
+  p.inf := a = 1; q.inf := b = 1
+END Swap;
+
+(* r := k q, k plain below n: a Montgomery ladder over all the bits of the curve size *)
+PROCEDURE Ladder(VAR c: Curve; VAR k: Num; VAR q, r: Point);
+VAR r0, r1: Point; i, bit, limb: LONGINT;
+BEGIN
+  TLSNum.MontOne(c.p, r0.x); r0.y := r0.x; r0.z := r0.x; r0.inf := TRUE;
+  r1 := q;
+  i := c.bytes * 8 - 1;
+  WHILE i >= 0 DO
+    limb := 0; IF i DIV TLSNum.Bits < k.len THEN limb := k.d[i DIV TLSNum.Bits] END;
+    bit := limb DIV ASH(1, i MOD TLSNum.Bits) MOD 2;
+    Swap(r0, r1, bit);
+    AddPoints(c, r0, r1, r1); Double(c, r0, r0);  (* r1 - r0 = q stays *)
+    Swap(r0, r1, bit);
+    DEC(i)
+  END;
+  r := r0;
+  TLSNum.SetZero(r1.x, r1.x.len); TLSNum.SetZero(r1.y, r1.y.len); TLSNum.SetZero(r1.z, r1.z.len)
+END Ladder;
+
+(* the affine x (and y) of p, n bytes each, big endian *)
+PROCEDURE Affine(VAR c: Curve; VAR p: Point; VAR x, y: TLSBytes.Buffer);
+VAR zinv, z2, z3, t, u: Num;
+BEGIN
+  TLSNum.MontInvPrime(p.z, c.p, zinv);
+  Mul(c, zinv, zinv, z2); Mul(c, z2, zinv, z3);
+  Mul(c, p.x, z2, t); TLSNum.FromMont(t, c.p, u); TLSNum.ToBytes(u, c.bytes, x);
+  Mul(c, p.y, z3, t); TLSNum.FromMont(t, c.p, u); TLSNum.ToBytes(u, c.bytes, y)
+END Affine;
+
+(* k := priv (the curve size in bytes, big endian), FALSE unless 0 < k < n *)
+PROCEDURE PrivateScalar(VAR c: Curve; VAR priv: TLSBytes.Buffer; VAR k: Num): BOOLEAN;
+BEGIN
+  IF priv.len # c.bytes THEN RETURN FALSE END;
+  TLSNum.FromBytes(priv.data, 0, priv.len, c.n.m.len, k);
+  RETURN ~TLSNum.IsZero(k) & (TLSNum.Compare(k, c.n.m) < 0)
+END PrivateScalar;
+
+(** pub := 04 x y of priv G; FALSE if priv (random bytes, the curve size) is not a scalar in
+  [1, n-1]: then the caller takes new random bytes *)
+PROCEDURE ECDHPublic*(curve: LONGINT; VAR priv, pub: TLSBytes.Buffer): BOOLEAN;
+VAR k: Num; g, r: Point; x, y: TLSBytes.Buffer;
+BEGIN
+  IF (curve # P256) & (curve # P384) THEN RETURN FALSE END;
+  IF ~PrivateScalar(curves[curve], priv, k) THEN RETURN FALSE END;
+  g.x := curves[curve].gx; g.y := curves[curve].gy; TLSNum.MontOne(curves[curve].p, g.z); g.inf := FALSE;
+  Ladder(curves[curve], k, g, r);
+  TLSNum.SetZero(k, k.len);
+  IF r.inf THEN RETURN FALSE END;
+  Affine(curves[curve], r, x, y);
+  TLSBytes.Init(pub); TLSBytes.AppendByte(pub, 4); TLSBytes.Append(pub, x); TLSBytes.Append(pub, y);
+  RETURN TRUE
+END ECDHPublic;
+
+(** shared := the x coordinate of priv times the point peer (04 x y), FALSE if peer is not a
+  point of the curve *)
+PROCEDURE ECDH*(curve: LONGINT; VAR priv, peer, shared: TLSBytes.Buffer): BOOLEAN;
+VAR k: Num; q, r: Point; y: TLSBytes.Buffer;
+BEGIN
+  TLSBytes.Init(shared);
+  IF (curve # P256) & (curve # P384) THEN RETURN FALSE END;
+  IF ~ParsePoint(curves[curve], peer, q) OR ~PrivateScalar(curves[curve], priv, k) THEN RETURN FALSE END;
+  Ladder(curves[curve], k, q, r);
+  TLSNum.SetZero(k, k.len);
+  IF r.inf THEN RETURN FALSE END;
+  Affine(curves[curve], r, shared, y);
+  RETURN TRUE
+END ECDH;
 
 BEGIN
   InitCurve(curves[P256], 32,

@@ -157,7 +157,10 @@ from `/dev/urandom`, roots from `$SSL_CERT_FILE` or `/etc/ssl/certs/ca-certifica
 connection is refused unless the certificate chain leads to one of those roots (RSA and ECDSA
 P-256/P-384 signatures, validity, CA and key usage constraints), the certificate is for the host
 name, CertificateVerify (ECDSA or RSA-PSS) verifies and the server's Finished is right; the
-ServerHello is checked strictly too (no downgrade, no HelloRetryRequest yet). `fetch.Verbose`
+ServerHello is checked strictly too (no downgrade). The key share is X25519, or P-256 when the
+server asks for it with a HelloRetryRequest (cookies too); KeyUpdate is followed; a body that
+ends without its length, its last chunk or TLS close_notify is reported incomplete and not
+saved by fetch. `fetch.Verbose`
 shows the handshake. `tools/fromvoc.py` copies a module of the tls repository with polpo's
 imports; the tests are in `src/lib/tls/test` (`TLS_TEST_CERTS=src/lib/tls/test/certs loksh
 TLSTestChain.Run` and so on).

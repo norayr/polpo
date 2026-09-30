@@ -21,6 +21,9 @@ CONST
   ExtSignatureAlgorithms = 13;
   ExtSupportedVersions = 43;
   ExtKeyShare = 51;
+  ExtCookie = 44;
+
+  GroupX25519* = 1DH; GroupP256* = 17H;  (** named groups: x25519, secp256r1 *)
 
   GroupX25519Hi = 0;
   GroupX25519Lo = 29;                (* 0x001d *)
@@ -84,37 +87,48 @@ BEGIN
   TLSBytes.AppendByte(extData, 6); TLSBytes.AppendByte(extData, 1)   (* rsa_pkcs1_sha512 *)
 END MakeSignatureAlgorithms;
 
+(* x25519 first (its key share is in the first ClientHello), secp256r1 after a HelloRetryRequest *)
 PROCEDURE MakeSupportedGroups(VAR extData: TLSBytes.Buffer);
 BEGIN
   TLSBytes.Init(extData);
-  TLSBytes.PutBE16(extData, 2);
-  TLSBytes.AppendByte(extData, GroupX25519Hi);
-  TLSBytes.AppendByte(extData, GroupX25519Lo)
+  TLSBytes.PutBE16(extData, 4);
+  TLSBytes.PutBE16(extData, GroupX25519);
+  TLSBytes.PutBE16(extData, GroupP256)
 END MakeSupportedGroups;
 
-PROCEDURE MakeClientKeyShare(VAR pubKey: TLSBytes.Buffer; VAR extData: TLSBytes.Buffer);
+(* the key share of group: x25519 32 bytes, secp256r1 65 (04 x y) *)
+PROCEDURE ShareLen(group: LONGINT): LONGINT;
 BEGIN
-  IF pubKey.len # 32 THEN HALT(90) END;
+  IF group = GroupX25519 THEN RETURN 32 ELSIF group = GroupP256 THEN RETURN 65 END;
+  RETURN 0
+END ShareLen;
+
+PROCEDURE MakeClientKeyShare(group: LONGINT; VAR pubKey: TLSBytes.Buffer; VAR extData: TLSBytes.Buffer);
+BEGIN
+  IF pubKey.len # ShareLen(group) THEN HALT(90) END;
   TLSBytes.Init(extData);
   TLSBytes.PutBE16(extData, 2 + 2 + pubKey.len);  (* client_shares vector length *)
-  TLSBytes.AppendByte(extData, GroupX25519Hi);
-  TLSBytes.AppendByte(extData, GroupX25519Lo);
+  TLSBytes.PutBE16(extData, group);
   TLSBytes.PutBE16(extData, pubKey.len);
   TLSBytes.Append(extData, pubKey)
 END MakeClientKeyShare;
 
-PROCEDURE BuildClientHelloMessage*(host: ARRAY OF CHAR; VAR random, pubKey: TLSBytes.Buffer; VAR msg: TLSBytes.Buffer);
+(* a ClientHello with the key share pubKey of group; cookie: the extension data of the cookie of
+   a HelloRetryRequest, echoed (none if empty) *)
+PROCEDURE BuildHello(host: ARRAY OF CHAR; VAR random: TLSBytes.Buffer; group: LONGINT;
+  VAR pubKey, cookie: TLSBytes.Buffer; VAR msg: TLSBytes.Buffer);
 VAR body, exts, e: TLSBytes.Buffer;
 BEGIN
   IF random.len # 32 THEN HALT(91) END;
-  IF pubKey.len # 32 THEN HALT(92) END;
+  IF pubKey.len # ShareLen(group) THEN HALT(92) END;
 
   TLSBytes.Init(exts);
   MakeSNI(host, e); AppendExtension(exts, ExtServerName, e);
   MakeSupportedVersions(e); AppendExtension(exts, ExtSupportedVersions, e);
   MakeSignatureAlgorithms(e); AppendExtension(exts, ExtSignatureAlgorithms, e);
   MakeSupportedGroups(e); AppendExtension(exts, ExtSupportedGroups, e);
-  MakeClientKeyShare(pubKey, e); AppendExtension(exts, ExtKeyShare, e);
+  MakeClientKeyShare(group, pubKey, e); AppendExtension(exts, ExtKeyShare, e);
+  IF cookie.len > 0 THEN AppendExtension(exts, ExtCookie, cookie) END;
 
   TLSBytes.Init(body);
   TLSBytes.AppendByte(body, LegacyMajor);
@@ -138,7 +152,23 @@ BEGIN
   TLSBytes.AppendByte(msg, ClientHello);
   TLSBytes.PutBE24(msg, body.len);
   TLSBytes.Append(msg, body)
+END BuildHello;
+
+(** the first ClientHello: the x25519 key share pubKey (32 bytes) *)
+PROCEDURE BuildClientHelloMessage*(host: ARRAY OF CHAR; VAR random, pubKey: TLSBytes.Buffer; VAR msg: TLSBytes.Buffer);
+VAR none: TLSBytes.Buffer;
+BEGIN
+  TLSBytes.Init(none);
+  BuildHello(host, random, GroupX25519, pubKey, none, msg)
 END BuildClientHelloMessage;
+
+(** the ClientHello after a HelloRetryRequest: the same random and session id, the key share
+  pubKey of group, the cookie of the HelloRetryRequest *)
+PROCEDURE BuildClientHello2*(host: ARRAY OF CHAR; VAR random: TLSBytes.Buffer; group: LONGINT;
+  VAR pubKey, cookie: TLSBytes.Buffer; VAR msg: TLSBytes.Buffer);
+BEGIN
+  BuildHello(host, random, group, pubKey, cookie, msg)
+END BuildClientHello2;
 
 PROCEDURE BuildPlainHandshakeRecord*(VAR handshakeMsg: TLSBytes.Buffer; VAR record: TLSBytes.Buffer);
 BEGIN
@@ -204,20 +234,30 @@ END ExtractServerHelloKeyShare;
   TLS 1.3 (supported_versions 0x0304), TLS_AES_128_GCM_SHA256, no compression, our session id
   echoed, an X25519 key share (in pubKey), no extension we did not offer, none twice; a
   HelloRetryRequest is not accepted. why: the reason when FALSE *)
-PROCEDURE CheckServerHello*(VAR msg, sid, pubKey: TLSBytes.Buffer; VAR why: ARRAY OF CHAR): BOOLEAN;
-VAR pos, extEnd, et, el, i, keyLen: LONGINT; hrr: BOOLEAN; sawVersions, sawKeyShare: BOOLEAN; r: TLSBytes.Buffer;
+(** msg is a HelloRetryRequest: a ServerHello with the random SHA-256("HelloRetryRequest") *)
+PROCEDURE IsHelloRetryRequest*(VAR msg: TLSBytes.Buffer): BOOLEAN;
+CONST hrr = "CF21AD74E59A6111BE1D8C021E65B891C2A211167ABB8C5E079E09E2C8A8339C";
+VAR i, v: LONGINT; h: ARRAY 65 OF CHAR;
 BEGIN
-  TLSBytes.Init(pubKey); COPY("malformed ServerHello", why);
+  IF (msg.len < 4 + 2 + 32) OR (ORD(msg.data[0]) # ServerHello) THEN RETURN FALSE END;
+  h := hrr; i := 0;
+  WHILE i < 32 DO
+    v := ORD(h[2*i]) - ORD("0"); IF v > 9 THEN v := v - 7 END;
+    v := v * 16 + ORD(h[2*i+1]) - ORD("0"); IF ORD(h[2*i+1]) > ORD("9") THEN v := v - 7 END;
+    IF ORD(msg.data[6 + i]) # v THEN RETURN FALSE END;
+    INC(i)
+  END;
+  RETURN TRUE
+END IsHelloRetryRequest;
+
+(* the fields before the extensions of a ServerHello or HelloRetryRequest: version, session id
+   echo, cipher suite, compression; pos: the first extension *)
+PROCEDURE HelloStart(VAR msg, sid: TLSBytes.Buffer; VAR pos: LONGINT; VAR why: ARRAY OF CHAR): BOOLEAN;
+VAR i: LONGINT;
+BEGIN
+  COPY("malformed ServerHello", why);
   IF (msg.len < 4 + 2 + 32 + 1) OR (ORD(msg.data[0]) # ServerHello) OR (TLSBytes.GetBE24(msg, 1) # msg.len - 4) THEN RETURN FALSE END;
   IF (ORD(msg.data[4]) # LegacyMajor) OR (ORD(msg.data[5]) # LegacyMinor) THEN RETURN FALSE END;
-  TLSBytes.Slice(msg, 6, 32, r);
-  (* SHA-256("HelloRetryRequest") *)
-  hrr := (r.data[0] = 0CFX) & (r.data[1] = 21X) & (r.data[2] = 0ADX) & (r.data[3] = 74X) & (r.data[4] = 0E5X) &
-    (r.data[5] = 9AX) & (r.data[6] = 61X) & (r.data[7] = 11X) & (r.data[31] = 9CX);
-  IF hrr THEN COPY("the server asks for a HelloRetryRequest (not supported)", why); RETURN FALSE END;
-  (* a TLS 1.2 or older server marks the random (RFC 8446 4.1.3): a downgrade *)
-  IF (r.data[24] = 44X) & (r.data[25] = 4FX) & (r.data[26] = 57X) & (r.data[27] = 4EX) & (r.data[28] = 47X) &
-     (r.data[29] = 52X) & (r.data[30] = 44X) THEN COPY("the server does not speak TLS 1.3 (downgrade marker)", why); RETURN FALSE END;
   pos := 38;
   IF (ORD(msg.data[pos]) # sid.len) OR (pos + 1 + sid.len + 3 + 2 > msg.len) THEN COPY("session id not echoed", why); RETURN FALSE END;
   i := 0;
@@ -229,24 +269,40 @@ BEGIN
   IF ORD(msg.data[pos + 2]) # 0 THEN RETURN FALSE END;
   INC(pos, 3);
   IF TLSBytes.GetBE16(msg, pos) + pos + 2 # msg.len THEN RETURN FALSE END;
-  extEnd := msg.len; INC(pos, 2);
+  INC(pos, 2);
+  RETURN TRUE
+END HelloStart;
+
+(** the ServerHello msg answers our ClientHello: TLS 1.3, the session id sid echoed, our cipher
+  suite, a key share of group (pubKey), only the extensions we offered, once each; not a
+  HelloRetryRequest, not a downgrade; why says what is wrong *)
+PROCEDURE CheckServerHelloGroup*(VAR msg, sid: TLSBytes.Buffer; group: LONGINT; VAR pubKey: TLSBytes.Buffer; VAR why: ARRAY OF CHAR): BOOLEAN;
+VAR pos, et, el, keyLen: LONGINT; sawVersions, sawKeyShare: BOOLEAN;
+BEGIN
+  TLSBytes.Init(pubKey);
+  IF IsHelloRetryRequest(msg) THEN COPY("an unexpected HelloRetryRequest", why); RETURN FALSE END;
+  (* a TLS 1.2 or older server marks the random (RFC 8446 4.1.3): a downgrade *)
+  IF (msg.len >= 38) & (msg.data[30] = 44X) & (msg.data[31] = 4FX) & (msg.data[32] = 57X) & (msg.data[33] = 4EX) &
+     (msg.data[34] = 47X) & (msg.data[35] = 52X) & (msg.data[36] = 44X) THEN
+    COPY("the server does not speak TLS 1.3 (downgrade marker)", why); RETURN FALSE
+  END;
+  IF ~HelloStart(msg, sid, pos, why) THEN RETURN FALSE END;
   sawVersions := FALSE; sawKeyShare := FALSE;
-  WHILE pos < extEnd DO
-    IF pos + 4 > extEnd THEN RETURN FALSE END;
+  WHILE pos < msg.len DO
+    COPY("malformed ServerHello", why);
+    IF pos + 4 > msg.len THEN RETURN FALSE END;
     et := TLSBytes.GetBE16(msg, pos); el := TLSBytes.GetBE16(msg, pos + 2); INC(pos, 4);
-    IF pos + el > extEnd THEN RETURN FALSE END;
+    IF pos + el > msg.len THEN RETURN FALSE END;
     IF et = ExtSupportedVersions THEN
       IF sawVersions OR (el # 2) OR (ORD(msg.data[pos]) # TLS13Major) OR (ORD(msg.data[pos+1]) # TLS13Minor) THEN
         COPY("not TLS 1.3", why); RETURN FALSE
       END;
       sawVersions := TRUE
     ELSIF et = ExtKeyShare THEN
-      IF sawKeyShare OR (el # 36) OR (ORD(msg.data[pos]) # GroupX25519Hi) OR (ORD(msg.data[pos+1]) # GroupX25519Lo) THEN
-        COPY("key share not X25519", why); RETURN FALSE
-      END;
-      keyLen := TLSBytes.GetBE16(msg, pos + 2);
-      IF keyLen # 32 THEN RETURN FALSE END;
-      TLSBytes.Slice(msg, pos + 4, 32, pubKey); sawKeyShare := TRUE
+      keyLen := ShareLen(group);
+      IF sawKeyShare OR (el < 4) OR (TLSBytes.GetBE16(msg, pos) # group) THEN COPY("key share not of the group offered", why); RETURN FALSE END;
+      IF (TLSBytes.GetBE16(msg, pos + 2) # keyLen) OR (el # 4 + keyLen) THEN RETURN FALSE END;
+      TLSBytes.Slice(msg, pos + 4, keyLen, pubKey); sawKeyShare := TRUE
     ELSE
       COPY("an extension we did not offer", why); RETURN FALSE
     END;
@@ -255,7 +311,51 @@ BEGIN
   IF ~sawVersions THEN COPY("not TLS 1.3 (no supported_versions)", why); RETURN FALSE END;
   IF ~sawKeyShare THEN COPY("no key share", why); RETURN FALSE END;
   RETURN TRUE
+END CheckServerHelloGroup;
+
+(** CheckServerHelloGroup for x25519 *)
+PROCEDURE CheckServerHello*(VAR msg, sid, pubKey: TLSBytes.Buffer; VAR why: ARRAY OF CHAR): BOOLEAN;
+BEGIN
+  RETURN CheckServerHelloGroup(msg, sid, GroupX25519, pubKey, why)
 END CheckServerHello;
+
+(** the HelloRetryRequest msg (RFC 8446 4.1.4) after a ClientHello with a key share of offered:
+  TLS 1.3, sid echoed, our cipher suite, and a group we support other than offered (group) or a
+  cookie (the extension data to echo, else empty), nothing else; why says what is wrong *)
+PROCEDURE CheckHelloRetryRequest*(VAR msg, sid: TLSBytes.Buffer; offered: LONGINT; VAR group: LONGINT;
+  VAR cookie: TLSBytes.Buffer; VAR why: ARRAY OF CHAR): BOOLEAN;
+VAR pos, et, el: LONGINT; sawVersions, sawKeyShare, sawCookie: BOOLEAN;
+BEGIN
+  TLSBytes.Init(cookie); group := offered;
+  IF ~IsHelloRetryRequest(msg) OR ~HelloStart(msg, sid, pos, why) THEN RETURN FALSE END;
+  sawVersions := FALSE; sawKeyShare := FALSE; sawCookie := FALSE;
+  WHILE pos < msg.len DO
+    COPY("malformed HelloRetryRequest", why);
+    IF pos + 4 > msg.len THEN RETURN FALSE END;
+    et := TLSBytes.GetBE16(msg, pos); el := TLSBytes.GetBE16(msg, pos + 2); INC(pos, 4);
+    IF pos + el > msg.len THEN RETURN FALSE END;
+    IF et = ExtSupportedVersions THEN
+      IF sawVersions OR (el # 2) OR (ORD(msg.data[pos]) # TLS13Major) OR (ORD(msg.data[pos+1]) # TLS13Minor) THEN
+        COPY("not TLS 1.3", why); RETURN FALSE
+      END;
+      sawVersions := TRUE
+    ELSIF et = ExtKeyShare THEN
+      IF sawKeyShare OR (el # 2) THEN RETURN FALSE END;
+      group := TLSBytes.GetBE16(msg, pos);
+      IF (ShareLen(group) = 0) OR (group = offered) THEN COPY("HelloRetryRequest for a group not offered", why); RETURN FALSE END;
+      sawKeyShare := TRUE
+    ELSIF et = ExtCookie THEN
+      IF sawCookie OR (el < 3) OR (TLSBytes.GetBE16(msg, pos) # el - 2) THEN RETURN FALSE END;
+      TLSBytes.Slice(msg, pos, el, cookie); sawCookie := TRUE
+    ELSE
+      COPY("an extension we did not offer", why); RETURN FALSE
+    END;
+    INC(pos, el)
+  END;
+  IF ~sawVersions THEN COPY("not TLS 1.3 (no supported_versions)", why); RETURN FALSE END;
+  IF ~sawKeyShare & ~sawCookie THEN COPY("a HelloRetryRequest that changes nothing", why); RETURN FALSE END;
+  RETURN TRUE
+END CheckHelloRetryRequest;
 
 PROCEDURE IsPlainHandshakeRecord*(VAR record: TLSBytes.Buffer): BOOLEAN;
 BEGIN
