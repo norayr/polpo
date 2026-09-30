@@ -933,7 +933,12 @@ CONST
   VAR oldy, r : LONGINT; r0Save, r1Save : LONGINT;
   BEGIN
     r0Save:=-1; r1Save:=-1;
-    
+    IF (x.mode # OC.Reg) & (x.mode # OC.Const) THEN
+      (* polpo: load x first: its address may use R0 or R1 (a[i DIV 15] DIV k: the index is the
+         result of a division, in R0), which are overwritten below before x is loaded *)
+      IF x.mode = OC.CC THEN loadB(x) ELSE load(x) END
+    END;
+
     (* load R0 *)
     IF (x.mode=OC.Reg) & (x.r=0) THEN (* Make Room for y *)
       OBC.SetPreferredReg(1); (* x should be loaded into R1, if possible *)

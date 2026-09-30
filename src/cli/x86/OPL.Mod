@@ -1365,6 +1365,9 @@ ASSERT(~loaded(instr.dest));
       src := instr.reg;
       AssignThisReg (instr.dest, SHORT (SHORT (instr.hint)) + size);
       OPO.GenMOV (RegReg, instr.reg, src, noInx, noScale, noDisp, noImm);
+      (* polpo: the old register must no longer name the result, or FreeReg marks it unloaded
+         although it is in the new one (ASH(1, i MOD 15): the count was read from address 0) *)
+      IF src >= AL THEN sregTab [src - AL] := Occupied ELSE regTab [src MOD 8] := Occupied END;
       FreeReg (src)
     END
   END GenAbs;
@@ -1488,6 +1491,9 @@ ASSERT(~loaded(instr.dest));
       src := instr.reg;
       AssignThisReg (instr.dest, SHORT (SHORT (instr.hint)) + size);
       OPO.GenMOV (RegReg, instr.reg, src, noInx, noScale, noDisp, noImm);
+      (* polpo: the old register must no longer name the result, or FreeReg marks it unloaded
+         although it is in the new one (ASH(1, i MOD 15): the count was read from address 0) *)
+      IF src >= AL THEN sregTab [src - AL] := Occupied ELSE regTab [src MOD 8] := Occupied END;
       FreeReg (src)
     END
   END GenDivMod;
