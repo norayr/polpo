@@ -148,7 +148,15 @@ connection), and `fetch` uses it:
 ```
 bin/x86/loksh fetch.Show http://example.com/          # the body on the screen
 bin/x86/loksh fetch.Get http://[::1]:8080/a.tar a.tar  # saved; without a file name: the last part of the path
+bin/x86/loksh fetch.Get https://example.com/ page.html # TLS 1.3
 ```
+
+HTTPS is TLS 1.3 written in Oberon (`src/lib/tls`, the modules of github.com/norayr/tls; only
+32 bit integers, so it runs on every port): X25519, AES-128-GCM, SHA-256, randomness from
+`/dev/urandom`, roots from `/etc/ssl/certs/ca-certificates.crt`. The server's Finished and the
+host name are checked, and chains of RSA certificates are verified; ECDSA certificates,
+CertificateVerify and refusing an untrusted chain are still to come. `fetch.Verbose` shows the
+handshake. `tools/fromvoc.py` copies a module of the tls repository with polpo's imports.
 
 `http`, `Internet`, `Sockets`, `DNS`, `strUtils` and `Base64` are the same files in voc
 (github.com/norayr: http, Internet, strutils, base64, branch polpo-compat), apart from their

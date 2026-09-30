@@ -682,7 +682,7 @@ CODE {SYSTEM.i386}
 END SysCall1;
 *)
 
-PROCEDURE GetTimeOfDay(tv, tz: LONGINT): LONGINT;
+PROCEDURE GetTimeOfDay*(tv, tz: LONGINT): LONGINT;  (* polpo: exported, as on the other ports (TLSNow) *)
 CONST GETTIMEOFDAY= 78;
 CODE {SYSTEM.i386}
   MOV  EAX, GETTIMEOFDAY

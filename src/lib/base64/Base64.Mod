@@ -1,7 +1,7 @@
 MODULE Base64;
  IMPORT Out := out, Strings := strings;  (* voc: Out, Strings *)
 VAR
-  EncodingTable : ARRAY 64 OF CHAR;
+  EncodingTable : ARRAY 65 OF CHAR;  (* 64 characters and 0X: with 64, COPY dropped the "/" *)
   fixToIncludeEOL*: BOOLEAN;
 (* Function to safely access characters in the EncodingTable *)
 PROCEDURE GetEncodingChar(index: LONGINT): CHAR;
@@ -89,7 +89,7 @@ VAR
   i: LONGINT;
 BEGIN
   i := 0;
-  WHILE i <= LEN(EncodingTable)-1 DO
+  WHILE i < 64 DO
     IF EncodingTable[i] = ch THEN
       RETURN i;
     END;
