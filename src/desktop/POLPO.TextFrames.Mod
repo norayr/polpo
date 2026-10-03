@@ -81,6 +81,12 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
     goalF: Frame; goalX: INTEGER;  (* column kept by consecutive up and down moves *)
     clipBuf: Texts.Buffer;  (* text copied with Ctrl+C or cut with Ctrl+X, with its looks *)
     hiddenF: Frame; hiddenPos: LONGINT;  (* the caret of hiddenF, scrolled out of view *)
+    (* polpo: a block selection (Ctrl+B): the columns from x bAnX to bCarX (frame relative, as
+       Location.x) on the lines from bAnLn (counted from 0) to the line of the caret *)
+    blockF: Frame;  (* the frame with a block, or NIL *)
+    bShown, bBusy: BOOLEAN;  (* the block is drawn; a block operation is changing the text *)
+    bAnLn: LONGINT; bAnX, bCarX: INTEGER;
+    blockClip: Texts.Text;  (* a copied block: its rows separated by CR; NIL if the clipboard is a stretch *)
 
   PROCEDURE Min (i, j: INTEGER): INTEGER;
   BEGIN IF i >= j THEN RETURN j ELSE RETURN i END
@@ -278,6 +284,7 @@ END MulDiv;
   PROCEDURE Restore* (F: Frame);
     VAR R: Texts.Reader;
   BEGIN (*F.mark = 0*)
+    IF blockF = F THEN blockF := NIL; bShown := FALSE END;  (* polpo: drawn anew, a block ends *)
     Display.ReplConst(F.col, F.X, F.Y, F.W, F.H, replace);
     IF F.left >= barW THEN
       Display.ReplConst(BarColor, F.X + barW - 1, F.Y, 1, F.H, replace)
@@ -377,6 +384,8 @@ END MulDiv;
 
   PROCEDURE ^LocatePos (F: Frame; pos: LONGINT; VAR loc: Location);
   PROCEDURE ^FlipSelection (F: Frame; VAR beg, end: Location);
+  PROCEDURE ^HideBlock (F: Frame);
+  PROCEDURE ^ShowBlock (F: Frame);
 
   (* polpo: loc for the selection boundary pos, which may be outside the lines shown:
      drawn at the nearest visible place, the position is kept *)
@@ -386,14 +395,16 @@ END MulDiv;
 
   (** Show the text from pos on; a selection stays selected (polpo) *)
   PROCEDURE Show* (F: Frame; pos: LONGINT);
-    VAR keep: BOOLEAN; beg, end: LONGINT;
+    VAR keep, keepBlock: BOOLEAN; beg, end: LONGINT;
   BEGIN
-    keep := F.sel # 0;
+    keep := F.sel # 0; keepBlock := (blockF = F) & bShown;
     IF keep THEN beg := F.selbeg.pos; end := F.selend.pos; FlipSelection(F, F.selbeg, F.selend); F.sel := 0 END;
+    IF keepBlock THEN HideBlock(F) END;
     ShowOrg(F, pos);
     IF keep THEN
       SelLoc(F, beg, F.selbeg); SelLoc(F, end, F.selend); FlipSelection(F, F.selbeg, F.selend); F.sel := 1
-    END
+    END;
+    IF keepBlock THEN ShowBlock(F) END
   END Show;
 
   PROCEDURE LocateLine (F: Frame; y: INTEGER; VAR loc: Location);
@@ -708,7 +719,9 @@ END MulDiv;
   (*------------------message handling------------------------*)
 
   PROCEDURE RemoveMarks (F: Frame);
-  BEGIN RemoveCaret(F); RemoveSelection(F)
+  BEGIN
+    RemoveCaret(F); RemoveSelection(F);
+    HideBlock(F); IF ~bBusy & (blockF = F) THEN blockF := NIL END  (* polpo: a block ends unless it changes the text itself *)
   END RemoveMarks;
 
   PROCEDURE GetAttr* (F: Frame; VAR s: ARRAY OF CHAR);
@@ -791,6 +804,270 @@ END MulDiv;
     RETURN n
   END Lines;
 
+  (* ----- polpo: block selection ----- *)
+
+  PROCEDURE LineNoAt (T: Texts.Text; pos: LONGINT): LONGINT;  (* the line of pos, from 0 *)
+    VAR R: Texts.Reader; c: CHAR; n, p: LONGINT;
+  BEGIN
+    n := 0; p := 0; Texts.OpenReader(R, T, 0);
+    WHILE p < pos DO Texts.Read(R, c); IF c = CR THEN INC(n) END; INC(p) END;
+    RETURN n
+  END LineNoAt;
+
+  PROCEDURE LineStartNo (T: Texts.Text; n: LONGINT): LONGINT;  (* the start of line n, -1 beyond the end *)
+    VAR p: LONGINT;
+  BEGIN
+    p := 0;
+    WHILE (n > 0) & (p >= 0) DO p := LineEnd(T, p); IF p < T.len THEN INC(p) ELSE p := -1 END; DEC(n) END;
+    RETURN p
+  END LineStartNo;
+
+  (* the position in the line starting at ls whose left edge is nearest to x (frame relative), and
+     that edge in px; the line end if x lies beyond it *)
+  PROCEDURE PosAtX (F: Frame; ls: LONGINT; x: INTEGER; VAR px: INTEGER): LONGINT;
+    VAR R: Texts.Reader; pos: LONGINT; ox, dx, n: INTEGER; obj: Objects.Object;
+  BEGIN
+    pos := ls; ox := F.left;
+    Texts.OpenReader(R, F.text, ls); Texts.Read(R, ch);
+    LOOP
+      IF R.eot OR (ch = CR) THEN EXIT END;
+      SafeGetObj(R, n, obj); dx := obj(Fonts.Char).dx;
+      IF ox + dx DIV 2 > x THEN EXIT END;
+      INC(pos, n); ox := ox + dx; Texts.Read(R, ch)
+    END;
+    px := ox; RETURN pos
+  END PosAtX;
+
+  (* the x (frame relative) of the left edge of pos in its line *)
+  PROCEDURE XAtPos (F: Frame; pos: LONGINT): INTEGER;
+    VAR R: Texts.Reader; ls: LONGINT;
+  BEGIN
+    ls := LineStart(F.text, pos);
+    Texts.OpenReader(R, F.text, ls); Texts.Read(R, ch);
+    RETURN F.left + Width(R, pos - ls)
+  END XAtPos;
+
+  PROCEDURE EndX (F: Frame; ls: LONGINT): INTEGER;  (* the x of the end of the line starting at ls *)
+  BEGIN RETURN XAtPos(F, LineEnd(F.text, ls))
+  END EndX;
+
+  (* the block of F: its first and last line, its columns l to r *)
+  PROCEDURE BlockArea (F: Frame; VAR first, last: LONGINT; VAR l, r: INTEGER);
+    VAR cl: LONGINT;
+  BEGIN
+    cl := LineNoAt(F.text, F.carloc.pos);
+    IF bAnLn <= cl THEN first := bAnLn; last := cl ELSE first := cl; last := bAnLn END;
+    IF bAnX <= bCarX THEN l := bAnX; r := bCarX ELSE l := bCarX; r := bAnX END
+  END BlockArea;
+
+  (* invert the block where it is shown; a block of width 0 is a thin bar on the lines that reach it *)
+  PROCEDURE FlipBlock (F: Frame);
+    VAR L: Line; org, ln, first, last, b: LONGINT; y, l, r, bx, ex: INTEGER;
+  BEGIN
+    BlockArea(F, first, last, l, r);
+    org := F.org; L := F.trailer.next; y := F.Y + F.H - F.top - L.asr; ln := LineNoAt(F.text, F.org);
+    WHILE L # F.trailer DO
+      IF (ln >= first) & (ln <= last) THEN
+        IF l < r THEN
+          b := PosAtX(F, org, l, bx); b := PosAtX(F, org, r, ex);
+          IF ex > bx THEN ReplConst(FullColor, F, F.X + bx, y - L.dsr, ex - bx, L.asr + L.dsr, invert) END
+        ELSIF EndX(F, org) >= l THEN
+          b := PosAtX(F, org, l, bx);
+          ReplConst(FullColor, F, F.X + bx, y - L.dsr, 2, L.asr + L.dsr, invert)
+        END
+      END;
+      org := org + L.len; y := y - Step(L); L := L.next; INC(ln)
+    END
+  END FlipBlock;
+
+  PROCEDURE ShowBlock (F: Frame);
+  BEGIN IF (blockF = F) & ~bShown THEN FlipBlock(F); bShown := TRUE END
+  END ShowBlock;
+
+  PROCEDURE HideBlock (F: Frame);
+  BEGIN IF (blockF = F) & bShown THEN FlipBlock(F); bShown := FALSE END
+  END HideBlock;
+
+  PROCEDURE EndBlock;
+  BEGIN IF blockF # NIL THEN HideBlock(blockF); blockF := NIL END
+  END EndBlock;
+
+  (* the width of c in the font lib *)
+  PROCEDURE CharW (lib: Objects.Library; c: CHAR): INTEGER;
+    VAR obj: Objects.Object;
+  BEGIN
+    IF (lib = NIL) OR ~(lib IS Fonts.Font) THEN lib := Fonts.Default END;
+    lib.GetObj(lib, ORD(c), obj);
+    IF (obj # NIL) & (obj IS Fonts.Char) & (obj(Fonts.Char).dx > 0) THEN RETURN obj(Fonts.Char).dx END;
+    RETURN 4
+  END CharW;
+
+  (* the width of a blank in the looks the caret writes with *)
+  PROCEDURE BlankW (lib: Objects.Library): INTEGER;
+  BEGIN RETURN CharW(lib, " ")
+  END BlankW;
+
+  (* the caret of the block to line ln, column x (beyond the line end too) *)
+  PROCEDURE BlockCaret (F: Frame; ln: LONGINT; x: INTEGER);
+    VAR ls: LONGINT; px: INTEGER;
+  BEGIN
+    IF x < F.left THEN x := F.left END;
+    ls := LineStartNo(F.text, ln);
+    IF ls >= 0 THEN bCarX := x; RemoveCaret(F); SetCaret(F, PosAtX(F, ls, x, px)) END
+  END BlockCaret;
+
+  (* delete the columns of the block on its lines; it keeps width 0 at its left column *)
+  PROCEDURE DeleteBlock (F: Frame);
+    VAR first, last, ln, ls, b, e, cl: LONGINT; l, r, bx, ex: INTEGER;
+  BEGIN
+    BlockArea(F, first, last, l, r); cl := LineNoAt(F.text, F.carloc.pos);
+    ln := first;
+    WHILE ln <= last DO
+      ls := LineStartNo(F.text, ln);
+      IF ls >= 0 THEN
+        b := PosAtX(F, ls, l, bx); e := PosAtX(F, ls, r, ex);
+        IF e > b THEN Texts.Delete(F.text, b, e) END
+      END;
+      INC(ln)
+    END;
+    bAnX := l; BlockCaret(F, cl, l)
+  END DeleteBlock;
+
+  (* type ch into every line of the block that reaches its column, after deleting its columns *)
+  PROCEDURE BlockType (F: Frame; ch1: CHAR; lib: Objects.Library; col, voff: SHORTINT);
+    VAR first, last, ln, ls, p, cl: LONGINT; l, r, px: INTEGER;
+  BEGIN
+    BlockArea(F, first, last, l, r);
+    IF l < r THEN DeleteBlock(F); BlockArea(F, first, last, l, r) END;
+    cl := LineNoAt(F.text, F.carloc.pos);
+    ln := first;
+    WHILE ln <= last DO
+      ls := LineStartNo(F.text, ln);
+      IF (ls >= 0) & (EndX(F, ls) >= l) THEN
+        p := PosAtX(F, ls, l, px);
+        KW.lib := lib; KW.col := col; KW.voff := voff; Texts.Write(KW, ch1); Texts.Insert(F.text, p, KW.buf)
+      END;
+      INC(ln)
+    END;
+    (* every line moved its column by the width of ch1: the nearest boundary to l + w is the one
+       after the inserted character on each of them (proportional fonts) *)
+    bAnX := l + CharW(lib, ch1); BlockCaret(F, cl, bAnX)
+  END BlockType;
+
+  (* Backspace (back) or Delete in a block of width 0: the character before or at its column *)
+  PROCEDURE BlockErase (F: Frame; back: BOOLEAN);
+    VAR first, last, ln, ls, p, cl: LONGINT; l, r, px, w: INTEGER;
+  BEGIN
+    BlockArea(F, first, last, l, r); cl := LineNoAt(F.text, F.carloc.pos);
+    ls := LineStartNo(F.text, cl); p := PosAtX(F, ls, l, px); w := 0;  (* the width taken out on the caret's line *)
+    IF back & (p > ls) THEN w := px - XAtPos(F, PrevPos(F.text, p)) END;
+    ln := first;
+    WHILE ln <= last DO
+      ls := LineStartNo(F.text, ln);
+      IF (ls >= 0) & (EndX(F, ls) >= l) THEN
+        p := PosAtX(F, ls, l, px);
+        IF back & (p > ls) THEN Texts.Delete(F.text, PrevPos(F.text, p), p)
+        ELSIF ~back & (p < LineEnd(F.text, ls)) THEN Texts.Delete(F.text, p, NextPos(F.text, p))
+        END
+      END;
+      INC(ln)
+    END;
+    bAnX := l - w; BlockCaret(F, cl, bAnX)
+  END BlockErase;
+
+  (* the block into blockClip and to the clipboard of X, rows joined by line ends *)
+  PROCEDURE CopyBlock (F: Frame);
+    VAR first, last, ln, ls, b, e, i: LONGINT; l, r, bx, ex: INTEGER; buf: Texts.Buffer;
+      R: Texts.Reader; s: POINTER TO ARRAY OF CHAR;
+  BEGIN
+    BlockArea(F, first, last, l, r);
+    NEW(blockClip); Texts.Open(blockClip, "");
+    ln := first;
+    WHILE ln <= last DO
+      ls := LineStartNo(F.text, ln);
+      IF ls >= 0 THEN
+        b := PosAtX(F, ls, l, bx); e := PosAtX(F, ls, r, ex);
+        IF e > b THEN NEW(buf); Texts.OpenBuf(buf); Texts.Save(F.text, b, e, buf); Texts.Append(blockClip, buf) END
+      END;
+      IF ln < last THEN Texts.Write(KW, CR); Texts.Append(blockClip, KW.buf) END;
+      INC(ln)
+    END;
+    clipBuf := NIL;
+    IF blockClip.len > 0 THEN
+      NEW(s, blockClip.len); Texts.OpenReader(R, blockClip, 0); i := 0;
+      WHILE i < blockClip.len DO Texts.Read(R, s[i]); IF s[i] = CR THEN s[i] := 0AX END; INC(i) END;
+      Input.SetClipboard(s^, blockClip.len)
+    END
+  END CopyBlock;
+
+  (* blockClip into the lines from the caret's on, at the caret's column; lines are lengthened
+     with blanks and added at the end as needed *)
+  PROCEDURE PasteBlock (F: Frame);
+    VAR R: Texts.Reader; c: CHAR; x, w: INTEGER; ln, ls, p, rowEnd: LONGINT; buf: Texts.Buffer; px: INTEGER;
+  BEGIN
+    x := F.carloc.x; ln := LineNoAt(F.text, F.carloc.pos); p := 0;
+    WHILE p <= blockClip.len DO
+      rowEnd := p; Texts.OpenReader(R, blockClip, p); Texts.Read(R, c);
+      WHILE ~R.eot & (c # CR) DO INC(rowEnd); Texts.Read(R, c) END;
+      ls := LineStartNo(F.text, ln);
+      IF ls < 0 THEN Texts.Write(KW, CR); Texts.Insert(F.text, F.text.len, KW.buf); ls := LineStartNo(F.text, ln) END;
+      w := BlankW(KW.lib);
+      WHILE EndX(F, ls) + w DIV 2 <= x DO Texts.Write(KW, " "); Texts.Insert(F.text, LineEnd(F.text, ls), KW.buf) END;
+      IF rowEnd > p THEN
+        NEW(buf); Texts.OpenBuf(buf); Texts.Save(blockClip, p, rowEnd, buf);
+        Texts.Insert(F.text, PosAtX(F, ls, x, px), buf)
+      END;
+      p := rowEnd + 1; INC(ln)
+    END
+  END PasteBlock;
+
+  (* the keys of a block: TRUE if ch was one *)
+  PROCEDURE BlockKey (F: Frame; ch1: CHAR; lib: Objects.Library; col, voff: SHORTINT): BOOLEAN;
+    VAR ln, ls, cl: LONGINT; n: INTEGER;
+  BEGIN
+    IF (ch1 = 7FX) OR (ch1 = 0A1X) OR (ch1 = 09X) OR (ch1 >= " ") & (ch1 < 7FX) OR (ch1 >= 80X) & (ch1 < 0A0X) OR
+       (ch1 >= 0AAX) & (ch1 < 0C1X) OR (ch1 > 0C4X) & (ch1 < 0F0X) THEN
+      bBusy := TRUE; HideBlock(F);
+      IF ((ch1 = 7FX) OR (ch1 = 0A1X)) & (bAnX = bCarX) THEN BlockErase(F, ch1 = 7FX)
+      ELSIF (ch1 = 7FX) OR (ch1 = 0A1X) THEN DeleteBlock(F)
+      ELSE BlockType(F, ch1, lib, col, voff)
+      END;
+      bBusy := FALSE; ShowBlock(F); RETURN TRUE
+    END;
+    cl := LineNoAt(F.text, F.carloc.pos);
+    IF (ch1 = 0C1X) OR (ch1 = 0C2X) OR (ch1 = 0C3X) OR (ch1 = 0C4X) OR (ch1 = 0A8X) OR (ch1 = 0A9X) OR
+       (ch1 = 0A2X) OR (ch1 = 0A3X) THEN
+      bBusy := TRUE; HideBlock(F);
+      IF ch1 = 0C1X THEN IF cl > 0 THEN BlockCaret(F, cl - 1, bCarX) END  (* up *)
+      ELSIF ch1 = 0C2X THEN IF LineStartNo(F.text, cl + 1) >= 0 THEN BlockCaret(F, cl + 1, bCarX) END  (* down *)
+      ELSIF ch1 = 0C3X THEN  (* right: the next character, past the end by blanks *)
+        ls := LineStart(F.text, F.carloc.pos);
+        IF (F.carloc.pos < LineEnd(F.text, ls)) & (bCarX <= F.carloc.x) THEN BlockCaret(F, cl, XAtPos(F, NextPos(F.text, F.carloc.pos)))
+        ELSE BlockCaret(F, cl, bCarX + BlankW(lib))
+        END
+      ELSIF ch1 = 0C4X THEN  (* left *)
+        IF bCarX > EndX(F, LineStart(F.text, F.carloc.pos)) THEN BlockCaret(F, cl, bCarX - BlankW(lib))
+        ELSIF F.carloc.pos > LineStart(F.text, F.carloc.pos) THEN BlockCaret(F, cl, XAtPos(F, PrevPos(F.text, F.carloc.pos)))
+        END
+      ELSIF ch1 = 0A8X THEN BlockCaret(F, cl, F.left)  (* Home *)
+      ELSIF ch1 = 0A9X THEN BlockCaret(F, cl, EndX(F, LineStart(F.text, F.carloc.pos)))  (* End *)
+      ELSE  (* Page Up, Page Down *)
+        n := Lines(F) - 1; IF n < 1 THEN n := 1 END; ln := cl;
+        IF ch1 = 0A2X THEN ln := ln - n; IF ln < 0 THEN ln := 0 END
+        ELSE WHILE (n > 0) & (LineStartNo(F.text, ln + 1) >= 0) DO INC(ln); DEC(n) END
+        END;
+        BlockCaret(F, ln, bCarX)
+      END;
+      bBusy := FALSE; ShowBlock(F); RETURN TRUE
+    END;
+    IF ch1 = 03X THEN CopyBlock(F); RETURN TRUE  (* Ctrl+C *)
+    ELSIF ch1 = 18X THEN  (* Ctrl+X *)
+      CopyBlock(F); bBusy := TRUE; HideBlock(F); DeleteBlock(F); bBusy := FALSE; EndBlock; RETURN TRUE
+    END;
+    EndBlock; RETURN FALSE  (* any other key ends the block and does its work *)
+  END BlockKey;
+
+
   (* move the caret to pos; with shift the selection runs from the anchor to pos *)
   PROCEDURE MoveCaret (F: Frame; pos: LONGINT; shift: BOOLEAN);
     VAR old: LONGINT;
@@ -871,7 +1148,7 @@ END MulDiv;
   BEGIN
     Oberon.GetSelection(text, beg, end, time);
     IF (time < 0) OR (end <= beg) THEN RETURN FALSE END;
-    NEW(clipBuf); Texts.OpenBuf(clipBuf); Texts.Save(text, beg, end, clipBuf);
+    NEW(clipBuf); Texts.OpenBuf(clipBuf); Texts.Save(text, beg, end, clipBuf); blockClip := NIL;
     NEW(s, end - beg); Texts.OpenReader(R, text, beg); i := 0;
     WHILE i < end - beg DO
       Texts.Read(R, s[i]); IF s[i] = CR THEN s[i] := 0AX END; INC(i)
@@ -885,7 +1162,8 @@ END MulDiv;
     VAR buf: Texts.Buffer; pos: LONGINT;
   BEGIN
     IF Input.RequestClipboard() THEN RETURN END;  (* arrives later as typed characters *)
-    IF clipBuf # NIL THEN
+    IF blockClip # NIL THEN PasteBlock(F)
+    ELSIF clipBuf # NIL THEN
       NEW(buf); Texts.OpenBuf(buf); Texts.Copy(clipBuf, buf);
       pos := F.carloc.pos + buf.len;
       Texts.Insert(F.text, F.carloc.pos, buf); SetCaret(F, pos)
@@ -896,6 +1174,17 @@ END MulDiv;
   VAR pos, beg, end, time: LONGINT; keys: SET; shift, ctrl: BOOLEAN; text: Texts.Text;
   BEGIN (*F.car # 0*)
     Input.KeyState(keys); shift := Input.SHIFT IN keys; ctrl := Input.CTRL IN keys;
+    IF ch = 02X THEN  (* polpo: Ctrl+B starts a block (a selection made with Shift becomes one), or ends it *)
+      IF blockF = F THEN EndBlock
+      ELSE
+        EndBlock; bAnLn := LineNoAt(F.text, F.carloc.pos); bAnX := F.carloc.x;
+        IF (anchorF = F) & (F.sel # 0) THEN bAnLn := LineNoAt(F.text, anchorPos); bAnX := XAtPos(F, anchorPos) END;
+        RemoveSelection(F); anchorF := NIL;
+        bCarX := F.carloc.x; blockF := F; bShown := FALSE; ShowBlock(F)
+      END;
+      RETURN
+    END;
+    IF (blockF = F) & BlockKey(F, ch, lib, col, voff) THEN RETURN END;
     IF (ch # 0C1X) & (ch # 0C2X) THEN goalF := NIL END;
     IF (ch = 7FX) OR (ch = 0A1X) THEN  (* a selection made with the keyboard is deleted as a whole *)
       IF (anchorF = F) & (F.sel # 0) THEN
@@ -1131,6 +1420,7 @@ END MulDiv;
       keysum: SET;
       ch: CHAR;
   BEGIN
+    IF (Keys # {}) & (blockF = F) THEN EndBlock END;  (* polpo: a click ends a block *)
     Oberon.DrawCursor(Oberon.Mouse, Oberon.Arrow, X, Y);
     IF X < F.X + Min(F.left, barW) THEN
       IF (0 IN Keys) OR (1 IN Keys) THEN keysum := Keys;
@@ -1518,6 +1808,7 @@ BEGIN
   END;
   SetMetrics;
   Texts.OpenWriter(W); Texts.OpenWriter(KW);
+  blockF := NIL; bShown := FALSE; bBusy := FALSE; blockClip := NIL;
   BoxPat[0] := {0..11}; 
   BoxPat[1] := {0, 11}; BoxPat[2] := {0, 11}; BoxPat[3] := {0, 11}; BoxPat[4] := {0, 11};
   BoxPat[5] := {0, 11}; BoxPat[6] := {0, 11}; BoxPat[7] := {0, 11}; BoxPat[8] := {0, 11};

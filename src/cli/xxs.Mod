@@ -5,10 +5,11 @@ MODULE xxs;  (** a small nano-like editor for the console, the size that fits ev
 
    Plain files stay plain, Oberon texts keep their fonts and colours; in the Write Out
    prompt (^O), ^T switches between storing as Oberon text and as plain text.
-   Keys as in nano: ^O write out, ^X exit, ^W where is, ^G help, ^A/^E line start/end, ^Y page up,
-   arrows, Home, End, PgUp, PgDn; Ctrl+Left/Right by words.
-   Selection as in TextFrames: Shift with the movement keys selects; Alt+Shift selects a block
-   (columns over lines). ^C copies the selection (without one: the location), ^K cuts it (without
+   Keys as in nano: ^O write out, ^X exit, ^W where is, ^G help, ^E line end, ^Y page up, arrows,
+   Home, End, PgUp, PgDn; Ctrl+Left/Right by words.
+   Selection as in TextFrames: Shift with the movement keys selects, ^A selects all. ^B starts a
+   block (columns over lines) that the movement keys then extend, until ^B again or an edit (no
+   modifier needed: works in every terminal); Alt+Shift with the movement keys does the same. ^C copies the selection (without one: the location), ^K cuts it (without
    one: the line), ^V and ^U paste. Typing, Backspace and Delete replace a selection; with a block
    they act on every line of it (a block of width 0 types into all its lines: indenting). Copies
    go to the terminal's clipboard too (OSC 52); a paste from the terminal is taken as it is. *)
@@ -33,6 +34,7 @@ VAR
   clipBlock: BOOLEAN; blockText: Texts.Text;  (* a copied block: its rows, separated by CR *)
   mods: LONGINT;  (* Shift, Alt, Ctrl with the last key *)
   selOn, block: BOOLEAN;  (* a selection: from anchor to cur, or a block *)
+  marking: BOOLEAN;  (* a block started by ^B: the movement keys extend it *)
   anchor: LONGINT;
   aLn, aCol, cCol: LONGINT;  (* a block: the line and column of its anchor, the column of the caret *)
   msg, search: ARRAY 256 OF CHAR;
@@ -314,7 +316,7 @@ BEGIN
 END StartSel;
 
 PROCEDURE ClearSel;
-BEGIN selOn := FALSE; block := FALSE
+BEGIN selOn := FALSE; block := FALSE; marking := FALSE
 END ClearSel;
 
 (* the block of the caret's line moves to column c: cur follows it *)
@@ -640,7 +642,7 @@ BEGIN
   Goto(rows - 1, 1);
   Help("^G", "Help"); Help("^O", "Write Out"); Help("^W", "Where Is"); Help("^K", "Cut"); Help("^C", "Copy"); Help("^V", "Paste");
   CSI("K"); Goto(rows, 1);
-  Help("^X", "Exit"); Help("^A", "Line Start"); Help("^E", "Line End"); Help("Shift", "Select"); Help("Alt+Shift", "Block");
+  Help("^X", "Exit"); Help("^A", "Select All"); Help("^E", "Line End"); Help("Shift", "Select"); Help("^B", "Block");
   CSI("K");
   IF selOn & block THEN Goto(LineNo(cur) - LineNo(top) + 2, cCol - hcol + 1)
   ELSE Goto(LineNo(cur) - LineNo(top) + 2, Col(cur) - hcol + 1)
@@ -719,14 +721,15 @@ BEGIN
   Str("xxs - a nano-like editor for Oberon texts and plain files"); Ch(CR); Ch(LF); Ch(CR); Ch(LF);
   Str("^O  Write Out: store the file; in the prompt ^T stores as plain or Oberon text"); Ch(CR); Ch(LF);
   Str("^X  Exit, asking to store changes"); Ch(CR); Ch(LF);
-  Str("Shift+arrows, Home, End, PgUp, PgDn  select; Alt+Shift+...  select a block (columns)"); Ch(CR); Ch(LF);
+  Str("Shift+arrows, Home, End, PgUp, PgDn  select;  ^A  select all"); Ch(CR); Ch(LF);
+  Str("^B  a block (columns over lines): the arrows extend it, ^B ends it (also Alt+Shift+...)"); Ch(CR); Ch(LF);
   Str("^C  Copy the selection (also to the terminal); without one: line, column, position"); Ch(CR); Ch(LF);
   Str("^K  Cut the selection; without one the line (^K again adds the next line)"); Ch(CR); Ch(LF);
   Str("^V  Paste (also ^U); a block goes into the lines below at the caret's column"); Ch(CR); Ch(LF);
   Str("    Typing, Backspace, Delete replace the selection; with a block on every line of"); Ch(CR); Ch(LF);
   Str("    it: a block of width 0 types into all its lines (indent), Delete takes columns out"); Ch(CR); Ch(LF);
   Str("^W  Where Is: search forward, from the top again at the end"); Ch(CR); Ch(LF);
-  Str("^A  Line Start   ^E  Line End   (also Home, End)   Ctrl+Left/Right  by words"); Ch(CR); Ch(LF);
+  Str("Home  Line Start   ^E  Line End   (also End)   Ctrl+Left/Right  by words"); Ch(CR); Ch(LF);
   Str("^Y  Prev Page    (also PgUp; Next Page: PgDn)"); Ch(CR); Ch(LF);
   Str("^L  Refresh the screen"); Ch(CR); Ch(LF); Ch(CR); Ch(LF);
   Str("Plain files stay plain; Oberon texts keep their fonts and colours, new text"); Ch(CR); Ch(LF);
@@ -760,7 +763,7 @@ BEGIN
     cur := PosAtCol(p, goalCol)
   ELSIF k = KLeft THEN IF ODD(mods DIV Ctrl) THEN cur := WordLeft(cur) ELSE cur := PrevPos(cur) END
   ELSIF k = KRight THEN IF ODD(mods DIV Ctrl) THEN cur := WordRight(cur) ELSE cur := NextPos(cur) END
-  ELSIF (k = KHome) OR (k = 1) THEN cur := LineStart(cur)
+  ELSIF k = KHome THEN cur := LineStart(cur)
   ELSIF (k = KEnd) OR (k = 5) THEN cur := LineEnd(cur)
   END
 END Move;
@@ -797,9 +800,19 @@ VAR p, ls, n: LONGINT; buf: Texts.Buffer; cut: BOOLEAN;
 BEGIN
   cut := FALSE; msg := "";
   IF (k # KUp) & (k # KDown) & (k # KPgUp) & (k # KPgDn) & (k # 19H) THEN goalCol := -1 END;
-  IF IsMove(k) & ODD(mods DIV Shift) & ODD(mods DIV Alt) THEN StartSel(TRUE); MoveBlock(k)
+  IF IsMove(k) & (ODD(mods DIV Shift) & ODD(mods DIV Alt) OR marking & selOn & block) THEN StartSel(TRUE); MoveBlock(k)
   ELSIF IsMove(k) & ODD(mods DIV Shift) THEN StartSel(FALSE); Move(k)
-  ELSIF IsMove(k) OR (k = 19H) OR (k = 1) OR (k = 5) THEN ClearSel; Move(k)
+  ELSIF IsMove(k) OR (k = 19H) OR (k = 5) THEN ClearSel; Move(k)
+  ELSIF k = 2 THEN  (* ^B: a block from here, a stretch becomes a block, or the block ends *)
+    IF selOn & block THEN ClearSel
+    ELSIF selOn THEN
+      p := cur; cur := anchor; aLn := LineNo(cur); aCol := Col(cur); cur := p; cCol := Col(cur);
+      block := TRUE; marking := TRUE
+    ELSE selOn := FALSE; StartSel(TRUE); marking := TRUE
+    END;
+    IF marking THEN msg := "Block: arrows extend it, ^B ends it" END
+  ELSIF k = 1 THEN  (* ^A: select all *)
+    ClearSel; anchor := 0; cur := T.len; selOn := TRUE
   ELSIF (k = 7FH) OR (k = 8) THEN  (* Backspace *)
     IF selOn & block & (aCol = cCol) THEN BlockErase(TRUE)
     ELSIF selOn THEN DeleteSel
@@ -877,7 +890,7 @@ BEGIN
   ELSE Texts.Open(T, name); plain := TRUE; msg := "New File"
   END;
   cur := 0; top := 0; hcol := 0; goalCol := -1; modified := FALSE; lastCut := FALSE; clip := NIL; clipBlock := FALSE;
-  selOn := FALSE; block := FALSE; mods := 0;
+  selOn := FALSE; block := FALSE; marking := FALSE; mods := 0;
   Texts.OpenWriter(W);
   IF ~Raw() THEN RETURN END;
   running := TRUE;
