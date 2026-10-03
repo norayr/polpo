@@ -71,6 +71,7 @@ mcompiler.Compile /s src/lib/tls/TLSX509Validity.Mod
 mcompiler.Compile /s src/lib/tls/TLSX509Names.Mod
 mcompiler.Compile /s src/lib/tls/TLSX509Ext.Mod
 mcompiler.Compile /s src/lib/tls/TLSSig.Mod
+mcompiler.Compile /s src/lib/tls/TLSNameConstraints.Mod
 mcompiler.Compile /s src/lib/tls/TLSX509Chain.Mod
 mcompiler.Compile /s src/lib/tls/TLS13EncHandshake.Mod
 mcompiler.Compile /s src/lib/tls/TLS13ClientFinished.Mod

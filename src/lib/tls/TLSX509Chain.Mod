@@ -6,8 +6,10 @@ MODULE TLSX509Chain;
    (basicConstraints cA; keyCertSign if keyUsage is present; pathLenConstraint respected). The leaf
    is valid now, may sign (digitalSignature if keyUsage is present) and may serve TLS (serverAuth
    if extendedKeyUsage is present). A certificate with a critical extension that is not understood
-   is refused. The walk ends at a trust anchor. The host name is checked elsewhere (TLSX509Names). *)
-IMPORT TLSBytes, TLSPEM, TLSX509, TLSX509Validity, TLSX509Ext, TLSSig;
+   is refused. The nameConstraints of every issuer, the trust anchor too (as browsers do), must
+   permit the names of the leaf (TLSNameConstraints). The walk ends at a trust anchor. The host
+   name is checked elsewhere (TLSX509Names). *)
+IMPORT TLSBytes, TLSPEM, TLSX509, TLSX509Validity, TLSX509Ext, TLSSig, TLSNameConstraints;
 
 CONST
   MaxDepth* = 8;
@@ -24,7 +26,7 @@ TYPE
   (* the certificates of a walk: on the heap, a CertInfo is 256 KB *)
   Work = POINTER TO WorkDesc;
   WorkDesc = RECORD
-    cur, issuer, cand: TLSX509.CertInfo;
+    leaf, cur, issuer, cand: TLSX509.CertInfo;
     curDER, issuerDER, candDER: TLSBytes.Buffer
   END;
 
@@ -60,6 +62,13 @@ BEGIN
   END;
   RETURN ~x.hasKeyUsage OR (TLSX509Ext.KeyCertSign IN x.keyUsage)
 END IssuerOK;
+
+(* the nameConstraints of the issuer c, if any, permit the names of the leaf *)
+PROCEDURE NamesOK(VAR c: TLSX509.CertInfo): BOOLEAN;
+VAR x: TLSX509Ext.Ext;
+BEGIN
+  RETURN TLSX509Ext.Parse(c, x) & (~x.hasNC OR TLSNameConstraints.Permit(x.nc, w.leaf))
+END NamesOK;
 
 (* an issuer of w.cur by name among the certificates the server sent, not w.cur itself *)
 PROCEDURE FindInChain(VAR certs: ARRAY OF TLSBytes.Buffer; certCount: LONGINT): BOOLEAN;
@@ -118,6 +127,7 @@ BEGIN
   IF ~r.leafParsed THEN r.failedAt := 0; RETURN FALSE END;
   IF ~TLSX509Validity.ValidAt(w.cur, now) THEN r.allTimesOK := FALSE; r.failedAt := 0; RETURN FALSE END;
   IF ~LeafOK(w.cur) THEN r.constraintsOK := FALSE; r.failedAt := 0; RETURN FALSE END;
+  w.leaf := w.cur;
   depth := 0;
   LOOP
     INC(depth); r.depth := depth;
@@ -127,7 +137,7 @@ BEGIN
     IF ~found THEN r.failedAt := depth; RETURN FALSE END;
     IF ~TLSX509Validity.ValidAt(w.issuer, now) THEN r.allTimesOK := FALSE; r.failedAt := depth; RETURN FALSE END;
     IF ~anchor & ~TLSSig.CertSignedBy(w.cur, w.issuer) THEN r.allSignaturesOK := FALSE; r.failedAt := depth; RETURN FALSE END;
-    IF ~IssuerOK(w.issuer, depth - 1, anchor) THEN r.constraintsOK := FALSE; r.failedAt := depth; RETURN FALSE END;
+    IF ~IssuerOK(w.issuer, depth - 1, anchor) OR ~NamesOK(w.issuer) THEN r.constraintsOK := FALSE; r.failedAt := depth; RETURN FALSE END;
     IF anchor THEN
       r.rootFound := TRUE; r.rootTrusted := TRUE; TLSBytes.Copy(w.issuerDER, r.rootDer);
       r.trusted := TRUE; RETURN TRUE

@@ -1,7 +1,7 @@
 MODULE TLSX509Ext;
 (* The certificate extensions a chain check needs (RFC 5280, 4.2): basicConstraints, keyUsage,
-   extendedKeyUsage, and whether a critical extension is not understood (such a certificate
-   must be refused). *)
+   extendedKeyUsage, nameConstraints (kept for TLSNameConstraints), and whether a critical
+   extension is not understood (such a certificate must be refused). *)
 IMPORT TLSBytes, TLSASN1, TLSX509, TLSX509Names;
 
 CONST
@@ -15,6 +15,8 @@ TYPE
     hasKeyUsage*: BOOLEAN;
     keyUsage*: SET;            (** bit i: the named bit i of KeyUsage *)
     hasEKU*, serverAuth*: BOOLEAN;  (** serverAuth: listed, or anyExtendedKeyUsage *)
+    hasNC*: BOOLEAN;
+    nc*: TLSBytes.Buffer;      (** the value of nameConstraints *)
     unknownCritical*: BOOLEAN
   END;
 
@@ -91,7 +93,7 @@ VAR
   critical, seenBasic, seenKU, seenEKU, seenSAN: BOOLEAN;
 BEGIN
   x.hasBasic := FALSE; x.isCA := FALSE; x.pathLen := -1; x.hasKeyUsage := FALSE; x.keyUsage := {};
-  x.hasEKU := FALSE; x.serverAuth := FALSE; x.unknownCritical := FALSE;
+  x.hasEKU := FALSE; x.serverAuth := FALSE; x.unknownCritical := FALSE; x.hasNC := FALSE; TLSBytes.Init(x.nc);
   seenBasic := FALSE; seenKU := FALSE; seenEKU := FALSE; seenSAN := FALSE;
   IF ~TLSX509Names.ExtractExtensionsFromTBS(info.tbs, exts) THEN RETURN TRUE END;  (* none (v1, v2) *)
   pos := 0;
@@ -115,6 +117,8 @@ BEGIN
       IF seenEKU OR ~ParseEKU(v, x) THEN RETURN FALSE END; seenEKU := TRUE
     ELSIF IsCE(oid, 11H) THEN
       IF seenSAN THEN RETURN FALSE END; seenSAN := TRUE     (* checked with the host name *)
+    ELSIF IsCE(oid, 1EH) THEN
+      IF x.hasNC THEN RETURN FALSE END; x.hasNC := TRUE; TLSBytes.Copy(v, x.nc)
     ELSIF critical THEN
       x.unknownCritical := TRUE
     END;

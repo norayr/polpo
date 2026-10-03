@@ -71,6 +71,7 @@ rvcompiler.Compile /s src/lib/tls/TLSX509Validity.Mod
 rvcompiler.Compile /s src/lib/tls/TLSX509Names.Mod
 rvcompiler.Compile /s src/lib/tls/TLSX509Ext.Mod
 rvcompiler.Compile /s src/lib/tls/TLSSig.Mod
+rvcompiler.Compile /s src/lib/tls/TLSNameConstraints.Mod
 rvcompiler.Compile /s src/lib/tls/TLSX509Chain.Mod
 rvcompiler.Compile /s src/lib/tls/TLS13EncHandshake.Mod
 rvcompiler.Compile /s src/lib/tls/TLS13ClientFinished.Mod

@@ -63,6 +63,20 @@ BEGIN
   AppendHost(extData, host)
 END MakeSNI;
 
+(* host is an IP address, not a name: only digits and dots (IPv4), or a colon (IPv6); RFC 6066 3
+   allows no address in server_name *)
+PROCEDURE IsAddress(host: ARRAY OF CHAR): BOOLEAN;
+VAR i: LONGINT; digitsDots: BOOLEAN;
+BEGIN
+  i := 0; digitsDots := TRUE;
+  WHILE (i < LEN(host)) & (host[i] # 0X) DO
+    IF host[i] = ":" THEN RETURN TRUE END;
+    IF ~((host[i] >= "0") & (host[i] <= "9") OR (host[i] = ".")) THEN digitsDots := FALSE END;
+    INC(i)
+  END;
+  RETURN digitsDots & (i > 0)
+END IsAddress;
+
 PROCEDURE MakeSupportedVersions(VAR extData: TLSBytes.Buffer);
 BEGIN
   TLSBytes.Init(extData);
@@ -123,7 +137,7 @@ BEGIN
   IF pubKey.len # ShareLen(group) THEN HALT(92) END;
 
   TLSBytes.Init(exts);
-  MakeSNI(host, e); AppendExtension(exts, ExtServerName, e);
+  IF ~IsAddress(host) THEN MakeSNI(host, e); AppendExtension(exts, ExtServerName, e) END;
   MakeSupportedVersions(e); AppendExtension(exts, ExtSupportedVersions, e);
   MakeSignatureAlgorithms(e); AppendExtension(exts, ExtSignatureAlgorithms, e);
   MakeSupportedGroups(e); AppendExtension(exts, ExtSupportedGroups, e);

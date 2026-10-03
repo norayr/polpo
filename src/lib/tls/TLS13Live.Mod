@@ -11,6 +11,10 @@ CONST
   CloseNotify = 0; UserCanceled = 90;           (* alert descriptions *)
   NewSessionTicket = 4; KeyUpdate = 24;         (* post-handshake messages *)
   SecretLen = 32;             (* SHA-256 *)
+  (* the alerts we send when we give up (RFC 8446 6.2) *)
+  UnexpectedMessage = 10; BadRecordMac = 20; RecordOverflow = 22; HandshakeFailure = 40;
+  BadCertificate = 42; CertificateExpired = 45; IllegalParameter = 47; UnknownCA = 48;
+  DecodeError = 50; DecryptError = 51; InternalError = 80;
 
 TYPE
   Chain = POINTER TO ChainDesc;
@@ -26,6 +30,7 @@ TYPE
     clientAppKey*, clientAppIV*, serverAppKey*, serverAppIV*: TLSBytes.Buffer;
     clientAppSeq*, serverAppSeq*: LONGINT;
     closeNotify*: BOOLEAN;  (** the server ended the connection properly (close_notify) *)
+    alert: LONGINT;         (* the alert for a failure after the handshake, 0: none *)
     clientAppSecret, serverAppSecret: TLSBytes.Buffer;  (* for KeyUpdate *)
     postHs: TLSBytes.Buffer;  (* post-handshake message bytes not yet complete *)
     pending: TLSBytes.Buffer;
@@ -38,6 +43,8 @@ VAR
   (* on the heap: 1.3 MB of locals was too much for the stack of polpo (8 MB with the rest), and
      as module variables too far for the PC relative addresses of its ARMv7 compiler *)
   chain: Chain;
+  alertDesc: LONGINT;  (* the alert for a failed handshake, 0: none *)
+  hsKeys: BOOLEAN;     (* the client handshake key is in clientAppKey, IV: alerts are encrypted *)
 
 PROCEDURE Init*(VAR s: State);
 BEGIN
@@ -46,7 +53,7 @@ BEGIN
   s.handshakeDone := FALSE;
   s.clientAppSeq := 0;
   s.serverAppSeq := 0;
-  s.closeNotify := FALSE;
+  s.closeNotify := FALSE; s.alert := 0;
   TLSBytes.Init(s.clientAppSecret); TLSBytes.Init(s.serverAppSecret); TLSBytes.Init(s.postHs);
   TLSBytes.Init(s.pending);
   s.pendingPos := 0
@@ -114,7 +121,7 @@ BEGIN
   TLSBytes.SetLen(rec, 5);
   IF ~ReadExact(fd, rec, 0, 5) THEN RETURN FALSE END;
   n := TLSBytes.GetBE16(rec, 3);
-  IF (n < 0) OR (n > MaxRecord) THEN COPY("a record longer than 2^14 + 256 bytes", lastError); RETURN FALSE END;
+  IF (n < 0) OR (n > MaxRecord) THEN COPY("a record longer than 2^14 + 256 bytes", lastError); alertDesc := RecordOverflow; RETURN FALSE END;
   TLSBytes.SetLen(rec, 5 + n);
   IF n > 0 THEN RETURN ReadExact(fd, rec, 5, n) END;
   RETURN TRUE
@@ -161,6 +168,35 @@ BEGIN
 END Fail;
 
 (* rec is a plain alert of the server instead of its hello: fail with its reason *)
+(* give up the handshake with the alert desc *)
+PROCEDURE Abort(desc: LONGINT; why: ARRAY OF CHAR);
+BEGIN
+  alertDesc := desc; Fail(why)
+END Abort;
+
+(* give up the connection s with the alert desc (sent by Disconnect) *)
+PROCEDURE AbortS(VAR s: State; desc: LONGINT; why: ARRAY OF CHAR);
+BEGIN
+  s.alert := desc; Fail(why)
+END AbortS;
+
+(* the fatal alert desc to the server: encrypted with the key of the client (clientAppKey: its
+   handshake key during the handshake) if encrypted, else plain *)
+PROCEDURE SendAlert(VAR s: State; desc: LONGINT; encrypted: BOOLEAN);
+VAR alert, rec: TLSBytes.Buffer; ok: BOOLEAN;
+BEGIN
+  TLSBytes.Init(alert); TLSBytes.AppendByte(alert, 2); TLSBytes.AppendByte(alert, desc);
+  IF encrypted THEN
+    TLS13Records.ProtectRecord(s.clientAppKey, s.clientAppIV, s.clientAppSeq, TLS13Records.Alert, alert, rec);
+    INC(s.clientAppSeq)
+  ELSE
+    TLSBytes.Init(rec); TLSBytes.AppendByte(rec, TLS13Records.Alert); TLSBytes.AppendByte(rec, 3); TLSBytes.AppendByte(rec, 3);
+    TLSBytes.PutBE16(rec, 2); TLSBytes.Append(rec, alert)
+  END;
+  ok := WriteAll(s.fd, rec);
+  IF verbose THEN Out.String("TLS13Live: sent alert "); Out.Int(desc, 0); Out.Ln END
+END SendAlert;
+
 PROCEDURE RefusedByAlert(VAR rec: TLSBytes.Buffer): BOOLEAN;
 BEGIN
   IF (rec.len # 7) OR (ORD(rec.data[0]) # TLS13Records.Alert) THEN RETURN FALSE END;
@@ -186,7 +222,7 @@ BEGIN
   WHILE i < LEN(chain.certs) DO TLSBytes.Init(chain.certs[i]); INC(i) END;
   i := 0;
   WHILE (i < n) & (i < LEN(chain.certs)) DO
-    IF ~TLS13EncHandshake.GetCapturedCert(i, chain.certs[i]) THEN RETURN FALSE END;
+    IF ~TLS13EncHandshake.GetCapturedCert(i, chain.certs[i]) THEN Abort(BadCertificate, "a certificate could not be read"); RETURN FALSE END;
     INC(i)
   END;
 
@@ -195,7 +231,7 @@ BEGIN
   IF verbose THEN Out.Ln END;
 
   IF ~TLSCABundle.LoadDefault(chain.ca) THEN
-    Out.String("TLS13Live: could not load the CA bundle "); Out.String(TLSCABundle.DefaultPath); Out.Ln;
+    Abort(InternalError, "the CA bundle could not be loaded (SSL_CERT_FILE or /etc/ssl/certs/ca-certificates.crt)");
     RETURN FALSE
   END;
   IF verbose THEN Out.String("TLS13Live: loaded CA bundle bytes="); Out.Int(chain.ca.len, 0); Out.Ln END;
@@ -213,9 +249,17 @@ BEGIN
   IF verbose THEN Out.String(" namesOK="); IF res.allNamesOK THEN Out.String("true") ELSE Out.String("false") END END;
   IF verbose THEN Out.String(" failedAt="); Out.Int(res.failedAt, 0); Out.Ln END;
 
-  IF ~ok THEN Fail("the certificate chain is not trusted"); RETURN FALSE END;
-  IF ~TLS13EncHandshake.HostnameOK() THEN Fail("the certificate is not for this host name"); RETURN FALSE END;
-  IF ~TLS13EncHandshake.CertificateVerifyOK() THEN Fail("CertificateVerify did not verify"); RETURN FALSE END;
+  IF ~ok THEN
+    IF ~res.leafParsed THEN Abort(BadCertificate, "the certificate of the server is malformed")
+    ELSIF ~res.allTimesOK THEN Abort(CertificateExpired, "a certificate of the chain is expired or not yet valid")
+    ELSIF ~res.allSignaturesOK THEN Abort(BadCertificate, "a signature of the certificate chain does not verify")
+    ELSIF ~res.constraintsOK THEN Abort(BadCertificate, "the certificate chain breaks a constraint (CA, key usage, path length or names)")
+    ELSE Abort(UnknownCA, "the certificate chain is not trusted (no known root)")
+    END;
+    RETURN FALSE
+  END;
+  IF ~TLS13EncHandshake.HostnameOK() THEN Abort(BadCertificate, "the certificate is not for this host name"); RETURN FALSE END;
+  IF ~TLS13EncHandshake.CertificateVerifyOK() THEN Abort(DecryptError, "CertificateVerify did not verify"); RETURN FALSE END;
   RETURN TRUE
 END CheckCapturedCertificateChain;
 
@@ -232,7 +276,7 @@ VAR
   serverHSSeq, clientHSSeq: LONGINT;
   why: ARRAY 128 OF CHAR;
 BEGIN
-  Init(s); lastError := "";
+  Init(s); lastError := ""; alertDesc := 0; hsKeys := FALSE;
   TLS13EncHandshake.verbose := verbose;
   TLS13EncHandshake.ResetState;
   TLS13EncHandshake.SetExpectedHost(host);
@@ -255,11 +299,11 @@ BEGIN
   IF ~NextNonCCS(s.fd, rec) THEN Out.String("TLS13Live: failed reading first server record"); Out.Ln; RETURN FALSE END;
   DumpRecordInfo("first server record", rec);
   IF RefusedByAlert(rec) THEN RETURN FALSE END;
-  IF ~TLS13Handshake.GetRecordPayload(rec, serverHelloMsg) THEN Out.String("TLS13Live: first server record is not plain handshake ServerHello"); Out.Ln; RETURN FALSE END;
+  IF ~TLS13Handshake.GetRecordPayload(rec, serverHelloMsg) THEN Abort(UnexpectedMessage, "the first record of the server is not a ServerHello"); RETURN FALSE END;
   DumpBuffer("server hello msg", serverHelloMsg);
   group := TLS13Handshake.GroupX25519;
   IF TLS13Handshake.IsHelloRetryRequest(serverHelloMsg) THEN
-    IF ~TLS13Handshake.CheckHelloRetryRequest(serverHelloMsg, clientRandom, group, group, cookie, why) THEN Fail(why); RETURN FALSE END;
+    IF ~TLS13Handshake.CheckHelloRetryRequest(serverHelloMsg, clientRandom, group, group, cookie, why) THEN Abort(IllegalParameter, why); RETURN FALSE END;
     IF verbose THEN Out.String("TLS13Live: HelloRetryRequest, group="); Out.Int(group, 0); Out.Ln END;
     (* the transcript: message_hash with the hash of the first ClientHello, then the HelloRetryRequest (RFC 8446 4.4.1) *)
     TLS13Keys.HashMessages(clientHelloMsg, h);
@@ -280,27 +324,28 @@ BEGIN
     TLSBytes.Append(th, clientHelloMsg);
     IF ~WriteAll(s.fd, clientHelloRec) THEN Fail("writing the second ClientHello failed"); RETURN FALSE END;
     IF ~NextNonCCS(s.fd, rec) OR RefusedByAlert(rec) OR ~TLS13Handshake.GetRecordPayload(rec, serverHelloMsg) THEN
-      Fail("no ServerHello after the HelloRetryRequest"); RETURN FALSE
+      Abort(UnexpectedMessage, "no ServerHello after the HelloRetryRequest"); RETURN FALSE
     END;
     DumpBuffer("server hello msg", serverHelloMsg)
   END;
-  IF ~TLS13Handshake.CheckServerHelloGroup(serverHelloMsg, clientRandom, group, serverPub, why) THEN Fail(why); RETURN FALSE END;  (* the session id we sent is clientRandom *)
+  IF ~TLS13Handshake.CheckServerHelloGroup(serverHelloMsg, clientRandom, group, serverPub, why) THEN Abort(IllegalParameter, why); RETURN FALSE END;  (* the session id we sent is clientRandom *)
   TLSBytes.Append(th, serverHelloMsg);
   DumpBuffer("server pub", serverPub);
 
   IF group = TLS13Handshake.GroupP256 THEN
-    IF ~TLSECDSA.ECDH(TLSECDSA.P256, p256Priv, serverPub, shared) THEN Fail("the P-256 key share of the server is not a point of the curve"); RETURN FALSE END;
+    IF ~TLSECDSA.ECDH(TLSECDSA.P256, p256Priv, serverPub, shared) THEN Abort(IllegalParameter, "the P-256 key share of the server is not a point of the curve"); RETURN FALSE END;
     Wipe(p256Priv); i := 0; WHILE i < 32 DO privArr[i] := 0X; INC(i) END
   ELSE
     TLSX25519.ScalarMult(sharedArr, privArr, serverPub.data);
     CopyArrayToBuffer(sharedArr, 32, shared);
     i := 0; zero := TRUE; WHILE i < 32 DO IF sharedArr[i] # 0X THEN zero := FALSE END; INC(i) END;
-    IF zero THEN Fail("the X25519 shared secret is zero (a small order point)"); RETURN FALSE END  (* RFC 7748 6.1 *)
+    IF zero THEN Abort(IllegalParameter, "the X25519 shared secret is zero (a small order point)"); RETURN FALSE END  (* RFC 7748 6.1 *)
   END;
 
   TLS13Keys.HashMessages(th, clientRandom); (* reusing clientRandom as transcript hash *)
   TLS13Keys.HandshakeKeys(shared, clientRandom, cHsKey, cHsIV, sHsKey, sHsIV, cFinKey, sFinKey);
   TLS13Keys.HandshakeSecret(shared, hsSecret);
+  TLSBytes.Copy(cHsKey, s.clientAppKey); TLSBytes.Copy(cHsIV, s.clientAppIV); s.clientAppSeq := 0; hsKeys := TRUE;
   i := 0; WHILE i < 32 DO privArr[i] := 0X; sharedArr[i] := 0X; shared.data[i] := 0X; INC(i) END;  (* no longer needed *)
 
   serverHSSeq := 0;
@@ -310,15 +355,15 @@ BEGIN
     IF ~NextNonCCS(s.fd, rec) THEN Out.String("TLS13Live: failed reading encrypted handshake record"); Out.Ln; RETURN FALSE END;
     DumpRecordInfo("encrypted server hs rec", rec);
     IF ~TLS13EncHandshake.OpenServerHandshakeRecordBuf(sHsKey, sHsIV, serverHSSeq, rec, serverFrag, th, sFinKey, sawFinished, finishedOK) THEN
-      IF (TLS13EncHandshake.CapturedCertCount() > 0) & ~TLS13EncHandshake.CertificateVerifyOK() THEN Fail("CertificateVerify did not verify")
-      ELSE Fail("the encrypted handshake failed (decryption, order of messages or Finished)")
+      IF (TLS13EncHandshake.CapturedCertCount() > 0) & ~TLS13EncHandshake.CertificateVerifyOK() THEN Abort(DecryptError, "CertificateVerify did not verify")
+      ELSE Abort(HandshakeFailure, "the encrypted handshake failed (decryption, order of messages or Finished)")
       END;
       RETURN FALSE
     END;
     IF verbose THEN Out.String("  buffered hs fragment bytes="); Out.Int(serverFrag.len, 0); Out.Ln END;
     INC(serverHSSeq)
   END;
-  IF ~finishedOK THEN Out.String("TLS13Live: server Finished verification failed"); Out.Ln; RETURN FALSE END;
+  IF ~finishedOK THEN Abort(DecryptError, "the Finished of the server does not verify"); RETURN FALSE END;
 
   IF verbose THEN Out.String("TLS13Live: server Finished OK, transcript len="); Out.Int(th.len, 0); Out.Ln END;
 
@@ -363,6 +408,7 @@ PROCEDURE Connect*(host, port: ARRAY OF CHAR; VAR s: State): BOOLEAN;
 BEGIN
   IF Handshake(host, port, s) THEN RETURN TRUE END;
   IF lastError = "" THEN COPY("no connection", lastError) END;
+  IF s.connected & (alertDesc > 0) THEN SendAlert(s, alertDesc, hsKeys) END;
   IF s.connected THEN Internet.Disconnect(s.fd) END;
   Init(s);
   RETURN FALSE
@@ -382,7 +428,9 @@ END SendCloseNotify;
 PROCEDURE Disconnect*(VAR s: State);
 BEGIN
   IF s.connected & s.handshakeDone & (s.clientAppSeq < MAX(LONGINT)) THEN
-    IF ~SendCloseNotify(s) & verbose THEN Out.String("TLS13Live: close_notify not sent"); Out.Ln END
+    IF s.alert > 0 THEN SendAlert(s, s.alert, TRUE)  (* a failure: its alert instead of close_notify *)
+    ELSIF ~SendCloseNotify(s) & verbose THEN Out.String("TLS13Live: close_notify not sent"); Out.Ln
+    END
   END;
   IF s.connected THEN Internet.Disconnect(s.fd) END;
   Wipe(s.clientAppKey); Wipe(s.clientAppIV); Wipe(s.serverAppKey); Wipe(s.serverAppIV);
@@ -446,7 +494,7 @@ END SendKeyUpdate;
 PROCEDURE PostHandshake(VAR s: State; VAR plain: TLSBytes.Buffer): BOOLEAN;
 VAR type, len: LONGINT; rest: TLSBytes.Buffer;
 BEGIN
-  IF plain.len = 0 THEN Fail("an empty handshake record"); RETURN FALSE END;
+  IF plain.len = 0 THEN AbortS(s, UnexpectedMessage, "an empty handshake record"); RETURN FALSE END;
   IF s.postHs.len + plain.len > TLSBytes.MaxLen THEN Fail("a post-handshake message too long"); RETURN FALSE END;
   TLSBytes.Append(s.postHs, plain);
   WHILE s.postHs.len >= 4 DO
@@ -456,15 +504,15 @@ BEGIN
     IF type = NewSessionTicket THEN
       IF verbose THEN Out.String("TLS13Live: NewSessionTicket (not used)"); Out.Ln END
     ELSIF type = KeyUpdate THEN
-      IF (len # 1) OR (ORD(s.postHs.data[4]) > 1) THEN Fail("a malformed KeyUpdate"); RETURN FALSE END;
-      IF s.postHs.len # 5 THEN Fail("KeyUpdate not at the end of a record"); RETURN FALSE END;
+      IF (len # 1) OR (ORD(s.postHs.data[4]) > 1) THEN AbortS(s, DecodeError, "a malformed KeyUpdate"); RETURN FALSE END;
+      IF s.postHs.len # 5 THEN AbortS(s, UnexpectedMessage, "KeyUpdate not at the end of a record"); RETURN FALSE END;
       IF verbose THEN Out.String("TLS13Live: KeyUpdate, request="); Out.Int(ORD(s.postHs.data[4]), 0); Out.Ln END;
       NextSecret(s.serverAppSecret);
       TLS13Keys.TrafficKey(s.serverAppSecret, s.serverAppKey); TLS13Keys.TrafficIV(s.serverAppSecret, s.serverAppIV);
       s.serverAppSeq := 0;
       IF (ORD(s.postHs.data[4]) = 1) & ~SendKeyUpdate(s) THEN RETURN FALSE END
     ELSE
-      Fail("an unexpected handshake message after the handshake"); RETURN FALSE
+      AbortS(s, UnexpectedMessage, "an unexpected handshake message after the handshake"); RETURN FALSE
     END;
     TLSBytes.Slice(s.postHs, 4 + len, s.postHs.len - 4 - len, rest); TLSBytes.Copy(rest, s.postHs)
   END;
@@ -480,21 +528,21 @@ BEGIN
   LOOP
     IF ~ReadRecord(s.fd, rec) THEN
       IF lastError = "" THEN Fail("the connection ended without close_notify (it may be cut)")
-      ELSE Fail(lastError)
+      ELSE AbortS(s, RecordOverflow, lastError)
       END;
       RETURN FALSE
     END;
     DumpRecordInfo("application read rec", rec);
-    IF IsCCS(rec) THEN Fail("change_cipher_spec after the handshake"); RETURN FALSE END;
+    IF IsCCS(rec) THEN AbortS(s, UnexpectedMessage, "change_cipher_spec after the handshake"); RETURN FALSE END;
     IF s.serverAppSeq = MAX(LONGINT) THEN Fail("too many records with one key"); RETURN FALSE END;
     IF ~TLS13Records.OpenRecord(s.serverAppKey, s.serverAppIV, s.serverAppSeq, rec, innerType, plain) THEN
-      Fail("an application record did not decrypt"); RETURN FALSE
+      AbortS(s, BadRecordMac, "an application record did not decrypt"); RETURN FALSE
     END;
-    IF plain.len > MaxPlain THEN Fail("a record longer than 2^14 bytes"); RETURN FALSE END;
+    IF plain.len > MaxPlain THEN AbortS(s, RecordOverflow, "a record longer than 2^14 bytes"); RETURN FALSE END;
     IF verbose THEN Out.String("TLS13Live: app inner type="); Out.Int(innerType, 0); Out.String(" plain len="); Out.Int(plain.len, 0); Out.Ln END;
     INC(s.serverAppSeq);
     IF (innerType # TLS13Records.Handshake) & (s.postHs.len > 0) THEN
-      Fail("a handshake message interrupted by another record"); RETURN FALSE
+      AbortS(s, UnexpectedMessage, "a handshake message interrupted by another record"); RETURN FALSE
     END;
     IF innerType = TLS13Records.ApplicationData THEN
       TLSBytes.Copy(plain, s.pending);
@@ -503,12 +551,12 @@ BEGIN
     ELSIF innerType = TLS13Records.Handshake THEN
       IF ~PostHandshake(s, plain) THEN RETURN FALSE END
     ELSIF innerType = TLS13Records.Alert THEN
-      IF plain.len # 2 THEN Fail("a malformed alert"); RETURN FALSE END;
+      IF plain.len # 2 THEN AbortS(s, DecodeError, "a malformed alert"); RETURN FALSE END;
       IF ORD(plain.data[1]) = CloseNotify THEN s.closeNotify := TRUE; RETURN FALSE
       ELSIF ORD(plain.data[1]) # UserCanceled THEN Fail("the server sent an alert"); RETURN FALSE
       END
     ELSE
-      Fail("an unexpected record type"); RETURN FALSE
+      AbortS(s, UnexpectedMessage, "an unexpected record type"); RETURN FALSE
     END
   END
 END ReadNextApplicationPlain;
@@ -544,5 +592,5 @@ BEGIN
 END ReadApp;
 
 BEGIN
-  verbose := FALSE; chain := NIL
+  verbose := FALSE; alertDesc := 0; hsKeys := FALSE; chain := NIL
 END TLS13Live.

@@ -101,6 +101,16 @@ BEGIN
   Host("wildcard, one label only", "rsa_leaf.der", "a.b.shop.example.test", FALSE);
   Host("wildcard, not the bare domain", "rsa_leaf.der", "shop.example.test", FALSE);
   Host("no wildcard for a top level domain", "tld_leaf.der", "example.test", FALSE);
+  (* name constraints of nc_int: example.test and 10.0.0.0/8, not bad.example.test *)
+  Case("names within the constraints", "nc_ok_leaf.der", "nc_int.der", "rsa_root.der", TRUE);
+  Case("a name outside the constraints", "nc_out_leaf.der", "nc_int.der", "rsa_root.der", FALSE);
+  Case("a name in an excluded subtree", "nc_excl_leaf.der", "nc_int.der", "rsa_root.der", FALSE);
+  Case("an address outside the constraints", "nc_ip_leaf.der", "nc_int.der", "rsa_root.der", FALSE);
+  Case("a wildcard over an excluded subtree", "nc_wild_leaf.der", "nc_int.der", "rsa_root.der", FALSE);
+  Case("subject in the directoryName constraint", "ncdir_ok_leaf.der", "ncdir_int.der", "rsa_root.der", TRUE);
+  Case("subject outside the directoryName constraint", "ncdir_bad_leaf.der", "ncdir_int.der", "rsa_root.der", FALSE);
+  Case("rfc822Name constraint, no such name", "ncmail_ok_leaf.der", "ncmail_int.der", "rsa_root.der", TRUE);
+  Case("rfc822Name constraint, such a name", "ncmail_bad_leaf.der", "ncmail_int.der", "rsa_root.der", FALSE);
   ok := TRUE
 END Run;
 

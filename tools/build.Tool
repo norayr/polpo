@@ -66,6 +66,7 @@ compiler.Compile /s src/lib/tls/TLSX509Validity.Mod
 compiler.Compile /s src/lib/tls/TLSX509Names.Mod
 compiler.Compile /s src/lib/tls/TLSX509Ext.Mod
 compiler.Compile /s src/lib/tls/TLSSig.Mod
+compiler.Compile /s src/lib/tls/TLSNameConstraints.Mod
 compiler.Compile /s src/lib/tls/TLSX509Chain.Mod
 compiler.Compile /s src/lib/tls/TLS13EncHandshake.Mod
 compiler.Compile /s src/lib/tls/TLS13ClientFinished.Mod

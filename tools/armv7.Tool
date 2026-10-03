@@ -72,6 +72,7 @@ a7compiler.Compile /s src/lib/tls/TLSX509Validity.Mod
 a7compiler.Compile /s src/lib/tls/TLSX509Names.Mod
 a7compiler.Compile /s src/lib/tls/TLSX509Ext.Mod
 a7compiler.Compile /s src/lib/tls/TLSSig.Mod
+a7compiler.Compile /s src/lib/tls/TLSNameConstraints.Mod
 a7compiler.Compile /s src/lib/tls/TLSX509Chain.Mod
 a7compiler.Compile /s src/lib/tls/TLS13EncHandshake.Mod
 a7compiler.Compile /s src/lib/tls/TLS13ClientFinished.Mod
