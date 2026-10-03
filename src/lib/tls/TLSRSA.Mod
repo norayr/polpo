@@ -54,21 +54,32 @@ BEGIN
   RETURN TRUE
 END IntegerBytes;
 
-(** n and e of an RSA SubjectPublicKeyInfo (rsaEncryption) *)
-PROCEDURE PublicKey*(VAR spki: TLSBytes.Buffer; VAR n, e: TLSBytes.Buffer): BOOLEAN;
+(** n and e of an RSA SubjectPublicKeyInfo: rsaEncryption, or id-RSASSA-PSS (pss; params: the
+  parameters it restricts its signatures to, if any) *)
+PROCEDURE PublicKeyAlg*(VAR spki: TLSBytes.Buffer; VAR n, e: TLSBytes.Buffer; VAR pss: BOOLEAN; VAR params: TLSBytes.Buffer): BOOLEAN;
 VAR pos, lim, kpos, klim: LONGINT; t: TLSASN1.TLV; oid, key: TLSBytes.Buffer;
 BEGIN
-  pos := 0;
+  pos := 0; pss := FALSE;
   IF ~TLSASN1.EnterSequence(spki, pos, spki.len, pos, lim) THEN RETURN FALSE END;
-  IF ~TLSX509.ParseAlgorithmIdentifier(spki, pos, lim, oid) THEN RETURN FALSE END;
+  IF ~TLSX509.ParseAlgorithm(spki, pos, lim, oid, params) THEN RETURN FALSE END;
   IF ~((oid.len = 9) & (ORD(oid.data[0]) = 2AH) & (ORD(oid.data[1]) = 86H) & (ORD(oid.data[2]) = 48H) &
       (ORD(oid.data[3]) = 86H) & (ORD(oid.data[4]) = 0F7H) & (ORD(oid.data[5]) = 0DH) &
-      (ORD(oid.data[6]) = 1) & (ORD(oid.data[7]) = 1) & (ORD(oid.data[8]) = 1)) THEN RETURN FALSE END;
+      (ORD(oid.data[6]) = 1) & (ORD(oid.data[7]) = 1) & ((ORD(oid.data[8]) = 1) OR (ORD(oid.data[8]) = 0AH))) THEN
+    RETURN FALSE
+  END;
+  pss := ORD(oid.data[8]) = 0AH;
   IF ~TLSASN1.ExpectTag(spki, pos, lim, TLSASN1.BitString, t) OR (t.len < 2) OR (spki.data[t.val] # 0X) THEN RETURN FALSE END;
   TLSBytes.Slice(spki, t.val + 1, t.len - 1, key);
   kpos := 0;
   IF ~TLSASN1.EnterSequence(key, kpos, key.len, kpos, klim) THEN RETURN FALSE END;
   RETURN IntegerBytes(key, kpos, klim, n) & IntegerBytes(key, kpos, klim, e) & (kpos = klim)
+END PublicKeyAlg;
+
+(** n and e of an rsaEncryption SubjectPublicKeyInfo *)
+PROCEDURE PublicKey*(VAR spki: TLSBytes.Buffer; VAR n, e: TLSBytes.Buffer): BOOLEAN;
+VAR pss: BOOLEAN; params: TLSBytes.Buffer;
+BEGIN
+  RETURN PublicKeyAlg(spki, n, e, pss, params) & ~pss
 END PublicKey;
 
 (* out := sig^e mod n as k bytes, k = the length of n; FALSE if sig is not k bytes below n *)
@@ -125,14 +136,14 @@ BEGIN
   mask.len := len
 END MGF1;
 
-(** the PSS signature sig of hash by (n, e): MGF1 and hash alg, salt of the hash length *)
-PROCEDURE VerifyPSS*(VAR n, e: TLSBytes.Buffer; alg: LONGINT; VAR hash, sig: TLSBytes.Buffer): BOOLEAN;
+(** the PSS signature sig of hash by (n, e): MGF1 and hash alg, a salt of sLen bytes *)
+PROCEDURE VerifyPSSSalt*(VAR n, e: TLSBytes.Buffer; alg: LONGINT; VAR hash, sig: TLSBytes.Buffer; sLen: LONGINT): BOOLEAN;
 VAR
   em, masked, h, mask, db, m, h2: TLSBytes.Buffer;
-  k, bits, emBits, emLen, hLen, sLen, dbLen, top, i, zeroBits, start: LONGINT; ok: BOOLEAN;
+  k, bits, emBits, emLen, hLen, dbLen, top, i, zeroBits, start: LONGINT; ok: BOOLEAN;
 BEGIN
-  hLen := HashLen(alg); sLen := hLen;
-  IF (hLen = 0) OR (hash.len # hLen) THEN RETURN FALSE END;
+  hLen := HashLen(alg);
+  IF (hLen = 0) OR (hash.len # hLen) OR (sLen < 0) THEN RETURN FALSE END;
   IF ~PublicOp(n, e, sig, em) THEN RETURN FALSE END;
   k := n.len; top := ORD(n.data[0]); bits := (k - 1) * 8;
   WHILE top > 0 DO INC(bits); top := top DIV 2 END;
@@ -158,6 +169,12 @@ BEGIN
   i := dbLen - sLen;
   WHILE i < dbLen DO TLSBytes.AppendChar(m, db.data[i]); INC(i) END;
   RETURN Hash(alg, m, h2) & TLSBytes.EqualConstTime(h, h2)
+END VerifyPSSSalt;
+
+(** the PSS signature sig of hash by (n, e): MGF1 and hash alg, salt of the hash length (TLS 1.3) *)
+PROCEDURE VerifyPSS*(VAR n, e: TLSBytes.Buffer; alg: LONGINT; VAR hash, sig: TLSBytes.Buffer): BOOLEAN;
+BEGIN
+  RETURN VerifyPSSSalt(n, e, alg, hash, sig, HashLen(alg))
 END VerifyPSS;
 
 END TLSRSA.

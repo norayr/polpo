@@ -90,9 +90,10 @@ BEGIN
   TLSBytes.Init(extData);
   (* the schemes TLSSig verifies: ECDSA and RSA-PSS for CertificateVerify; RSA PKCS#1 v1.5 only
      for certificates (without signature_algorithms_cert this list covers both, RFC 8446 4.2.3) *)
-  TLSBytes.PutBE16(extData, 16);
+  TLSBytes.PutBE16(extData, 18);
   TLSBytes.AppendByte(extData, 4); TLSBytes.AppendByte(extData, 3);  (* ecdsa_secp256r1_sha256 *)
   TLSBytes.AppendByte(extData, 5); TLSBytes.AppendByte(extData, 3);  (* ecdsa_secp384r1_sha384 *)
+  TLSBytes.AppendByte(extData, 6); TLSBytes.AppendByte(extData, 3);  (* ecdsa_secp521r1_sha512 *)
   TLSBytes.AppendByte(extData, 8); TLSBytes.AppendByte(extData, 4);  (* rsa_pss_rsae_sha256 *)
   TLSBytes.AppendByte(extData, 8); TLSBytes.AppendByte(extData, 5);  (* rsa_pss_rsae_sha384 *)
   TLSBytes.AppendByte(extData, 8); TLSBytes.AppendByte(extData, 6);  (* rsa_pss_rsae_sha512 *)

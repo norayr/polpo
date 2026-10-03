@@ -111,6 +111,11 @@ BEGIN
   Case("subject outside the directoryName constraint", "ncdir_bad_leaf.der", "ncdir_int.der", "rsa_root.der", FALSE);
   Case("rfc822Name constraint, no such name", "ncmail_ok_leaf.der", "ncmail_int.der", "rsa_root.der", TRUE);
   Case("rfc822Name constraint, such a name", "ncmail_bad_leaf.der", "ncmail_int.der", "rsa_root.der", FALSE);
+  (* RSASSA-PSS and P-521 signatures *)
+  Case("RSASSA-PSS chain (SHA-256 salt 32, SHA-384 salt 48)", "pss_leaf.der", "pss_int.der", "rsa_root.der", TRUE);
+  Case("RSASSA-PSS with a salt of 20", "pss_salt_leaf.der", "pss_int.der", "rsa_root.der", TRUE);
+  Case("P-521 intermediate, SHA-512", "p521_leaf.der", "p521_int.der", "ec_root.der", TRUE);
+  Case("RSASSA-PSS leaf against the wrong intermediate", "pss_leaf.der", "rsa_int.der", "rsa_root.der", FALSE);
   ok := TRUE
 END Run;
 

@@ -9,6 +9,7 @@ TYPE
     validity*: TLSBytes.Buffer;
     spki*: TLSBytes.Buffer;
     sigAlgOID*: TLSBytes.Buffer;
+    sigAlgParams*: TLSBytes.Buffer;  (** the encoded parameters of the signature algorithm, if any *)
     pubAlgOID*: TLSBytes.Buffer;
     signature*: TLSBytes.Buffer;
     signatureUnusedBits*: LONGINT
@@ -36,6 +37,18 @@ BEGIN
   RETURN TRUE
 END ParseAlgorithmIdentifier;
 
+(** the OID and the encoded parameters (what follows the OID, may be empty) of the
+  AlgorithmIdentifier at pos *)
+PROCEDURE ParseAlgorithm*(VAR der: TLSBytes.Buffer; VAR pos: LONGINT; limit: LONGINT; VAR oid, params: TLSBytes.Buffer): BOOLEAN;
+VAR p, lim: LONGINT; t: TLSASN1.TLV;
+BEGIN
+  TLSBytes.Init(oid); TLSBytes.Init(params);
+  IF ~TLSASN1.EnterSequence(der, pos, limit, p, lim) THEN RETURN FALSE END;
+  IF ~TLSASN1.ExpectTag(der, p, lim, TLSASN1.ObjectIdentifier, t) OR ~TLSASN1.CopyValue(der, t, oid) THEN RETURN FALSE END;
+  IF p < lim THEN TLSBytes.Slice(der, p, lim - p, params) END;
+  RETURN TRUE
+END ParseAlgorithm;
+
 PROCEDURE ParseSubjectPublicKeyInfo(VAR spki: TLSBytes.Buffer; VAR pubAlgOID: TLSBytes.Buffer): BOOLEAN;
 VAR p, lim: LONGINT;
 BEGIN
@@ -52,14 +65,14 @@ VAR
   tmpPos: LONGINT;
   t: TLSASN1.TLV;
   ok: BOOLEAN;
-  outerAlg: TLSBytes.Buffer;
+  outerAlg, outerParams: TLSBytes.Buffer;
 BEGIN
   TLSBytes.Init(info.tbs);
   TLSBytes.Init(info.issuer);
   TLSBytes.Init(info.subject);
   TLSBytes.Init(info.validity);
   TLSBytes.Init(info.spki);
-  TLSBytes.Init(info.sigAlgOID);
+  TLSBytes.Init(info.sigAlgOID); TLSBytes.Init(info.sigAlgParams);
   TLSBytes.Init(info.pubAlgOID);
   TLSBytes.Init(info.signature);
   info.signatureUnusedBits := 0;
@@ -97,7 +110,7 @@ BEGIN
 
   IF ok THEN
     (* signature inside TBSCertificate *)
-    IF ~ParseAlgorithmIdentifier(der, tbsPos, tbsLimit, info.sigAlgOID) THEN ok := FALSE END
+    IF ~ParseAlgorithm(der, tbsPos, tbsLimit, info.sigAlgOID, info.sigAlgParams) THEN ok := FALSE END
   END;
 
   IF ok THEN
@@ -142,8 +155,8 @@ BEGIN
   IF ok THEN
     (* certificate.signatureAlgorithm: it must be the one inside the signed TBSCertificate
        (RFC 5280, 4.1.1.2); the outer one is not signed *)
-    IF ~ParseAlgorithmIdentifier(der, certPos, certLimit, outerAlg) THEN ok := FALSE
-    ELSIF ~TLSBytes.EqualConstTime(outerAlg, info.sigAlgOID) THEN ok := FALSE
+    IF ~ParseAlgorithm(der, certPos, certLimit, outerAlg, outerParams) THEN ok := FALSE
+    ELSIF ~TLSBytes.EqualConstTime(outerAlg, info.sigAlgOID) OR ~TLSBytes.EqualConstTime(outerParams, info.sigAlgParams) THEN ok := FALSE
     END
   END;
 

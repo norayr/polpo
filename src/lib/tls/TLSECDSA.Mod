@@ -1,5 +1,5 @@
 MODULE TLSECDSA;
-(* ECDSA signature verification over NIST P-256 and P-384 (FIPS 186-4, SEC 1), for certificates
+(* ECDSA signature verification over NIST P-256, P-384 and P-521 (FIPS 186-4, SEC 1), for certificates
    and CertificateVerify, and ECDH (SEC 1 3.3.1) for a TLS key share. Field arithmetic modulo p
    and n in Montgomery form with TLSNum (32 bit integers only); Jacobian coordinates with the
    a = -3 doubling (dbl-2001-b) and add-2007-bl; u1*G + u2*Q in one pass (Shamir).
@@ -10,43 +10,46 @@ MODULE TLSECDSA;
 IMPORT TLSBytes, TLSNum;
 
 CONST
-  P256* = 1; P384* = 2;  (** curves *)
+  P256* = 1; P384* = 2; P521* = 3;  (** curves *)
 
 TYPE
   Num = TLSNum.Num;
   Curve = RECORD
-    bytes: LONGINT;          (* 32 or 48 *)
+    bytes: LONGINT;          (* 32, 48 or 66 *)
     p, n: TLSNum.Modulus;
     b, gx, gy, three: Num    (* Montgomery form modulo p *)
   END;
   Point = RECORD x, y, z: Num; inf: BOOLEAN END;
 
 VAR
-  curves: ARRAY 3 OF Curve;
+  curves: ARRAY 4 OF Curve;
 
 PROCEDURE HexVal(ch: CHAR): LONGINT;
 BEGIN
   IF ch <= "9" THEN RETURN ORD(ch) - ORD("0") ELSE RETURN ORD(ch) - ORD("a") + 10 END
 END HexVal;
 
-(* the big endian hex number h in n *)
-PROCEDURE HexNum(h: ARRAY OF CHAR; VAR n: Num);
+(* the big endian hex number h1 h2 in n (two halves: string constants are short on ARM) *)
+PROCEDURE HexNum(h1, h2: ARRAY OF CHAR; VAR n: Num);
 VAR b: TLSBytes.Buffer; i: LONGINT;
 BEGIN
   TLSBytes.Init(b); i := 0;
-  WHILE (i < LEN(h) - 1) & (h[i] # 0X) DO TLSBytes.AppendByte(b, HexVal(h[i]) * 16 + HexVal(h[i+1])); INC(i, 2) END;
+  WHILE (i < LEN(h1) - 1) & (h1[i] # 0X) DO TLSBytes.AppendByte(b, HexVal(h1[i]) * 16 + HexVal(h1[i+1])); INC(i, 2) END;
+  i := 0;
+  WHILE (i < LEN(h2) - 1) & (h2[i] # 0X) DO TLSBytes.AppendByte(b, HexVal(h2[i]) * 16 + HexVal(h2[i+1])); INC(i, 2) END;
   TLSNum.FromBytes(b.data, 0, b.len, 0, n)
 END HexNum;
 
-PROCEDURE InitCurve(VAR c: Curve; bytes: LONGINT; p, n, b, gx, gy: ARRAY OF CHAR);
+(* p, n, b, gx, gy of the curve, each as two halves of its hex digits *)
+PROCEDURE InitCurve(VAR c: Curve; bytes: LONGINT; p1, p2, n1, n2, b1, b2, gx1, gx2, gy1, gy2: ARRAY OF CHAR);
 VAR t: Num;
 BEGIN
   c.bytes := bytes;
-  HexNum(p, t); TLSNum.InitModulus(t, c.p);
-  HexNum(n, t); TLSNum.InitModulus(t, c.n);
-  HexNum(b, t); t.len := c.p.m.len; TLSNum.ToMont(t, c.p, c.b);
-  HexNum(gx, t); t.len := c.p.m.len; TLSNum.ToMont(t, c.p, c.gx);
-  HexNum(gy, t); t.len := c.p.m.len; TLSNum.ToMont(t, c.p, c.gy);
+  HexNum(p1, p2, t); TLSNum.InitModulus(t, c.p);
+  HexNum(n1, n2, t); TLSNum.InitModulus(t, c.n);
+  HexNum(b1, b2, t); t.len := c.p.m.len; TLSNum.ToMont(t, c.p, c.b);
+  HexNum(gx1, gx2, t); t.len := c.p.m.len; TLSNum.ToMont(t, c.p, c.gx);
+  HexNum(gy1, gy2, t); t.len := c.p.m.len; TLSNum.ToMont(t, c.p, c.gy);
   TLSNum.SetSmall(t, c.p.m.len, 3); TLSNum.ToMont(t, c.p, c.three)
 END InitCurve;
 
@@ -177,7 +180,7 @@ PROCEDURE Verify*(curve: LONGINT; VAR pub, hash, r, s: TLSBytes.Buffer): BOOLEAN
 VAR
   e, rn, sn, w, u1, u2, t, x, zinv, z2: Num; q, res: Point; eb: TLSBytes.Buffer; n: LONGINT;
 BEGIN
-  IF (curve # P256) & (curve # P384) THEN RETURN FALSE END;
+  IF (curve # P256) & (curve # P384) & (curve # P521) THEN RETURN FALSE END;
   n := curves[curve].bytes;
   IF ~ParsePoint(curves[curve], pub, q) THEN RETURN FALSE END;
   (* 0 < r, s < n *)
@@ -301,7 +304,7 @@ END PrivateScalar;
 PROCEDURE ECDHPublic*(curve: LONGINT; VAR priv, pub: TLSBytes.Buffer): BOOLEAN;
 VAR k: Num; g, r: Point; x, y: TLSBytes.Buffer;
 BEGIN
-  IF (curve # P256) & (curve # P384) THEN RETURN FALSE END;
+  IF (curve # P256) & (curve # P384) & (curve # P521) THEN RETURN FALSE END;
   IF ~PrivateScalar(curves[curve], priv, k) THEN RETURN FALSE END;
   g.x := curves[curve].gx; g.y := curves[curve].gy; TLSNum.MontOne(curves[curve].p, g.z); g.inf := FALSE;
   Ladder(curves[curve], k, g, r);
@@ -318,7 +321,7 @@ PROCEDURE ECDH*(curve: LONGINT; VAR priv, peer, shared: TLSBytes.Buffer): BOOLEA
 VAR k: Num; q, r: Point; y: TLSBytes.Buffer;
 BEGIN
   TLSBytes.Init(shared);
-  IF (curve # P256) & (curve # P384) THEN RETURN FALSE END;
+  IF (curve # P256) & (curve # P384) & (curve # P521) THEN RETURN FALSE END;
   IF ~ParsePoint(curves[curve], peer, q) OR ~PrivateScalar(curves[curve], priv, k) THEN RETURN FALSE END;
   Ladder(curves[curve], k, q, r);
   TLSNum.SetZero(k, k.len);
@@ -329,15 +332,21 @@ END ECDH;
 
 BEGIN
   InitCurve(curves[P256], 32,
-    "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
-    "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
-    "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b",
-    "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
-    "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5");
+    "ffffffff000000010000000000000000", "00000000ffffffffffffffffffffffff",
+    "ffffffff00000000ffffffffffffffff", "bce6faada7179e84f3b9cac2fc632551",
+    "5ac635d8aa3a93e7b3ebbd55769886bc", "651d06b0cc53b0f63bce3c3e27d2604b",
+    "6b17d1f2e12c4247f8bce6e563a440f2", "77037d812deb33a0f4a13945d898c296",
+    "4fe342e2fe1a7f9b8ee7eb4a7c0f9e16", "2bce33576b315ececbb6406837bf51f5");
   InitCurve(curves[P384], 48,
-    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
-    "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
-    "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
-    "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
-    "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f");
+    "ffffffffffffffffffffffffffffffffffffffffffffffff", "fffffffffffffffeffffffff0000000000000000ffffffff",
+    "ffffffffffffffffffffffffffffffffffffffffffffffff", "c7634d81f4372ddf581a0db248b0a77aecec196accc52973",
+    "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe814112", "0314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
+    "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b98", "59f741e082542a385502f25dbf55296c3a545e3872760ab7",
+    "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147c", "e9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f");
+  InitCurve(curves[P521], 66,
+    "01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "fa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+    "0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109", "e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00",
+    "00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3d", "baa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66",
+    "011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e66", "2c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650");
 END TLSECDSA.
