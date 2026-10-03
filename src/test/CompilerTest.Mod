@@ -9,9 +9,11 @@ MODULE CompilerTest;  (** loksh CompilerTest.Run: code generator bugs fixed in p
    ROP2 (RISC-V, MIPS, ARMv7): a record copy from a VAR parameter at an offset beyond the
    immediate range; 8 VAR record arguments in a frame over 512 KB;
    RISC-V, MIPS: the end of a block move loop computed from a register reused for its length
-   (w.cur := w.issuer copied nothing, or ran over memory). *)
+   (w.cur := w.issuer copied nothing, or ran over memory);
+   ARMv7: SYSTEM.MOVE counted its length down in the register of the variable that held it (the
+   desktop sent X a request of the wrong length and hung), and copied a byte for a length of 0. *)
 
-IMPORT out;
+IMPORT SYSTEM, out;
 
 TYPE
   Small = RECORD a: LONGINT; pad: ARRAY 4 OF CHAR; b: LONGINT END;  (* 12 bytes *)
@@ -67,6 +69,16 @@ BEGIN
   Check("w.cur := w.issuer, 256 KB on the heap", (w.cur.h.data[3] = "B") & (w.cur.bits = 5))
 END BlockMove;
 
+(* the length n stays after SYSTEM.MOVE (as in Input.InternAtom); a length of 0 copies nothing *)
+PROCEDURE Moved(name: ARRAY OF CHAR; VAR zero: BOOLEAN): LONGINT;
+VAR b: ARRAY 16 OF LONGINT; n, k: LONGINT; c: ARRAY 4 OF CHAR;
+BEGIN
+  n := 0; WHILE (n < LEN(name)) & (name[n] # 0X) & (n < 48) DO INC(n) END;
+  SYSTEM.MOVE(SYSTEM.ADR(name[0]), SYSTEM.ADR(b[0]), n);
+  c[0] := "x"; k := 0; SYSTEM.MOVE(SYSTEM.ADR(name[0]), SYSTEM.ADR(c[0]), k); zero := c[0] = "x";
+  RETURN n
+END Moved;
+
 PROCEDURE Run*;
 VAR i, j, k, bit, x: LONGINT; arr: ARRAY 20 OF LONGINT; a, r: N; mm: M;
 BEGIN
@@ -90,6 +102,8 @@ BEGIN
   Check("record copy from a VAR parameter at offset 2252", r.len = 7);
   Frame;
   BlockMove;
+  Check("SYSTEM.MOVE keeps its length variable", Moved("OberonProperty", flag) = 14);
+  Check("SYSTEM.MOVE of 0 bytes copies nothing", flag);
   out.String("CompilerTest: "); out.Int(checks, 0); out.String(" checks, "); out.Int(fails, 0); out.String(" failed"); out.Ln
 END Run;
 

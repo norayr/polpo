@@ -901,7 +901,7 @@ END PowerOf2;
 
   PROCEDURE SYSmove*(VAR x, y, z: OPL.Item; zmult4: BOOLEAN);  (* x^ := z bytes at y *)
   (* doesn't work if overlapping and x > y *)
-    VAR at0: LONGINT; xadr, yadr: OPL.Item;
+    VAR at0: LONGINT; xadr, yadr, cnt: OPL.Item;
   BEGIN
     IF z.mode = OPT.Con THEN OPL.Load(x, OPL.T1); OPL.Load(y, OPL.T0); MoveRefBlock(x, y, z.offset, 1, 1)
     ELSE
@@ -909,19 +909,23 @@ END PowerOf2;
       xadr.mode := OPL.Reg; xadr.reg := OPL.T1; yadr.mode := OPL.Reg; yadr.reg := OPL.T0;
       OPL.Move(xadr, x, OPL.LInt);
       OPL.Move(yadr, y, OPL.LInt);
-      OPL.Load( z, -1);
+      (* polpo: count down in a copy: z may be a variable kept in a register (it was counted down to
+         0); nothing to do for z <= 0 (one byte was copied) *)
+      cnt.mode := OPL.Reg; cnt.reg := -1; OPL.GetR(OPL.TempReg, cnt.reg); OPL.Move(cnt, z, OPL.LInt);
+      OPL.PutI( OPL.SUBI+OPL.SETFLAGS, cnt.reg, cnt.reg, 0);
+      OPL.PutB( OPL.B-OPL.AL+OPL.LE, 5 -OPL.pcahead);  (* end *)
       (* loop0: *) OPL.PutLS(OPL.LDRB+OPL.IncAfter, at0, OPL.T0, 1);
-      OPL.PutI( OPL.SUBI+OPL.SETFLAGS, z.reg, z.reg, 1);
+      OPL.PutI( OPL.SUBI+OPL.SETFLAGS, cnt.reg, cnt.reg, 1);
       OPL.PutLS(OPL.STRB+OPL.IncAfter, at0,  OPL.T1, 1);
       OPL.PutB( OPL.B-OPL.AL+OPL.GT, -3 -OPL.pcahead);  (* loop0 *)
-      (* end: *) OPL.ReleaseR(z.reg);
+      (* end: *) OPL.ReleaseR(cnt.reg);
       OPL.ReleaseR( at0);
     END
   END SYSmove;
 
   PROCEDURE SYSmove8(VAR x, y, z: OPL.Item);  (* x^ := z bytes at y multiple of 8 bytes, aligned*)
   (* doesn't work if overlapping and x > y *)
-    VAR at0: LONGINT; xadr, yadr: OPL.Item;
+    VAR at0: LONGINT; xadr, yadr, cnt: OPL.Item;
   BEGIN
     IF z.mode = OPT.Con THEN OPL.Load(x, OPL.T1); OPL.Load(y, OPL.T0); MoveRefBlock(x, y, z.offset, 1, 1)
     ELSE
@@ -929,12 +933,15 @@ END PowerOf2;
       xadr.mode := OPL.Reg; xadr.reg := OPL.T1; yadr.mode := OPL.Reg; yadr.reg := OPL.T0;
       OPL.Move(xadr, x, OPL.LInt);
       OPL.Move(yadr, y, OPL.LInt);
-      OPL.Load( z, -1); 
+      (* polpo: count down in a copy, as in SYSmove; nothing for z <= 0 *)
+      cnt.mode := OPL.Reg; cnt.reg := -1; OPL.GetR(OPL.TempReg, cnt.reg); OPL.Move(cnt, z, OPL.LInt);
+      OPL.PutI( OPL.SUBI+OPL.SETFLAGS, cnt.reg, cnt.reg, 0);
+      OPL.PutB( OPL.B-OPL.AL+OPL.LE, 5 -OPL.pcahead);  (* end *)
       (* loop0: *) OPL.PutLS(OPL.LDR+OPL.IncAfter, at0, OPL.T0, 4 );
-      OPL.PutI( OPL.SUBI+OPL.SETFLAGS, z.reg, z.reg, 4);
+      OPL.PutI( OPL.SUBI+OPL.SETFLAGS, cnt.reg, cnt.reg, 4);
       OPL.PutLS(OPL.STR+OPL.IncAfter, at0, OPL.T1, 4);
       OPL.PutB(OPL.B-OPL.AL+OPL.GT, -3 -OPL.pcahead);  (* loop0 *)
-      (* end: *) OPL.ReleaseR( z.reg);
+      (* end: *) OPL.ReleaseR(cnt.reg);
       OPL.ReleaseR( at0);
     END
   END SYSmove8;
