@@ -101,6 +101,12 @@ BEGIN
   RETURN r
 END Leave;
 
+(** polpo: reads with t return what has arrived within tenths tenths of a second, maybe nothing *)
+PROCEDURE Timeout*(VAR t: Termios; tenths: LONGINT);
+BEGIN
+  t.cc[vmin] := 0X; t.cc[vtime] := CHR(tenths)
+END Timeout;
+
 (** polpo: raw mode for full screen programs: no line buffering, echo or signals (^C, ^Z,
   ^S, ^Q, ^V are keys), Enter is CR, one character at a time *)
 PROCEDURE MakeRaw*(VAR t: Termios);

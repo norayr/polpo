@@ -85,6 +85,7 @@ MODULE TextFrames;  (** portable *) (* JG / pjm *)
        Location.x) on the lines from bAnLn (counted from 0) to the line of the caret *)
     blockF: Frame;  (* the frame with a block, or NIL *)
     bShown, bBusy: BOOLEAN;  (* the block is drawn; a block operation is changing the text *)
+    bMarking: BOOLEAN;  (* the movement keys extend the block; after an edit or a copy they end it *)
     bAnLn: LONGINT; bAnX, bCarX: INTEGER;
     blockClip: Texts.Text;  (* a copied block: its rows separated by CR; NIL if the clipboard is a stretch *)
 
@@ -881,11 +882,13 @@ END MulDiv;
   END FlipBlock;
 
   PROCEDURE ShowBlock (F: Frame);
-  BEGIN IF (blockF = F) & ~bShown THEN FlipBlock(F); bShown := TRUE END
+  BEGIN
+    IF (blockF = F) & ~bShown THEN Oberon.RemoveMarks(F.X, F.Y, F.W, F.H); FlipBlock(F); bShown := TRUE END
   END ShowBlock;
 
   PROCEDURE HideBlock (F: Frame);
-  BEGIN IF (blockF = F) & bShown THEN FlipBlock(F); bShown := FALSE END
+  BEGIN
+    IF (blockF = F) & bShown THEN Oberon.RemoveMarks(F.X, F.Y, F.W, F.H); FlipBlock(F); bShown := FALSE END
   END HideBlock;
 
   PROCEDURE EndBlock;
@@ -1027,7 +1030,7 @@ END MulDiv;
   BEGIN
     IF (ch1 = 7FX) OR (ch1 = 0A1X) OR (ch1 = 09X) OR (ch1 >= " ") & (ch1 < 7FX) OR (ch1 >= 80X) & (ch1 < 0A0X) OR
        (ch1 >= 0AAX) & (ch1 < 0C1X) OR (ch1 > 0C4X) & (ch1 < 0F0X) THEN
-      bBusy := TRUE; HideBlock(F);
+      bBusy := TRUE; HideBlock(F); bMarking := FALSE;
       IF ((ch1 = 7FX) OR (ch1 = 0A1X)) & (bAnX = bCarX) THEN BlockErase(F, ch1 = 7FX)
       ELSIF (ch1 = 7FX) OR (ch1 = 0A1X) THEN DeleteBlock(F)
       ELSE BlockType(F, ch1, lib, col, voff)
@@ -1035,8 +1038,8 @@ END MulDiv;
       bBusy := FALSE; ShowBlock(F); RETURN TRUE
     END;
     cl := LineNoAt(F.text, F.carloc.pos);
-    IF (ch1 = 0C1X) OR (ch1 = 0C2X) OR (ch1 = 0C3X) OR (ch1 = 0C4X) OR (ch1 = 0A8X) OR (ch1 = 0A9X) OR
-       (ch1 = 0A2X) OR (ch1 = 0A3X) THEN
+    IF bMarking & ((ch1 = 0C1X) OR (ch1 = 0C2X) OR (ch1 = 0C3X) OR (ch1 = 0C4X) OR (ch1 = 0A8X) OR (ch1 = 0A9X) OR
+       (ch1 = 0A2X) OR (ch1 = 0A3X)) THEN
       bBusy := TRUE; HideBlock(F);
       IF ch1 = 0C1X THEN IF cl > 0 THEN BlockCaret(F, cl - 1, bCarX) END  (* up *)
       ELSIF ch1 = 0C2X THEN IF LineStartNo(F.text, cl + 1) >= 0 THEN BlockCaret(F, cl + 1, bCarX) END  (* down *)
@@ -1060,7 +1063,7 @@ END MulDiv;
       END;
       bBusy := FALSE; ShowBlock(F); RETURN TRUE
     END;
-    IF ch1 = 03X THEN CopyBlock(F); RETURN TRUE  (* Ctrl+C *)
+    IF ch1 = 03X THEN CopyBlock(F); bMarking := FALSE; RETURN TRUE  (* Ctrl+C *)
     ELSIF ch1 = 18X THEN  (* Ctrl+X *)
       CopyBlock(F); bBusy := TRUE; HideBlock(F); DeleteBlock(F); bBusy := FALSE; EndBlock; RETURN TRUE
     END;
@@ -1180,7 +1183,7 @@ END MulDiv;
         EndBlock; bAnLn := LineNoAt(F.text, F.carloc.pos); bAnX := F.carloc.x;
         IF (anchorF = F) & (F.sel # 0) THEN bAnLn := LineNoAt(F.text, anchorPos); bAnX := XAtPos(F, anchorPos) END;
         RemoveSelection(F); anchorF := NIL;
-        bCarX := F.carloc.x; blockF := F; bShown := FALSE; ShowBlock(F)
+        bCarX := F.carloc.x; blockF := F; bShown := FALSE; bMarking := TRUE; ShowBlock(F)
       END;
       RETURN
     END;
@@ -1808,7 +1811,7 @@ BEGIN
   END;
   SetMetrics;
   Texts.OpenWriter(W); Texts.OpenWriter(KW);
-  blockF := NIL; bShown := FALSE; bBusy := FALSE; blockClip := NIL;
+  blockF := NIL; bShown := FALSE; bBusy := FALSE; bMarking := FALSE; blockClip := NIL;
   BoxPat[0] := {0..11}; 
   BoxPat[1] := {0, 11}; BoxPat[2] := {0, 11}; BoxPat[3] := {0, 11}; BoxPat[4] := {0, 11};
   BoxPat[5] := {0, 11}; BoxPat[6] := {0, 11}; BoxPat[7] := {0, 11}; BoxPat[8] := {0, 11};

@@ -8,8 +8,9 @@ MODULE xxs;  (** a small nano-like editor for the console, the size that fits ev
    Keys as in nano: ^O write out, ^X exit, ^W where is, ^G help, ^E line end, ^Y page up, arrows,
    Home, End, PgUp, PgDn; Ctrl+Left/Right by words.
    Selection as in TextFrames: Shift with the movement keys selects, ^A selects all. ^B starts a
-   block (columns over lines) that the movement keys then extend, until ^B again or an edit (no
-   modifier needed: works in every terminal); Alt+Shift with the movement keys does the same. ^C copies the selection (without one: the location), ^K cuts it (without
+   block (columns over lines) that the movement keys then extend; once something is typed, deleted
+   or copied they end it and move, as Esc and ^B do (no modifier needed: works in every terminal);
+   Alt+Shift with the movement keys selects a block too. ^C copies the selection (without one: the location), ^K cuts it (without
    one: the line), ^V and ^U paste. Typing, Backspace and Delete replace a selection; with a block
    they act on every line of it (a block of width 0 types into all its lines: indenting). Copies
    go to the terminal's clipboard too (OSC 52); a paste from the terminal is taken as it is. *)
@@ -22,6 +23,7 @@ CONST
   KUp = 1001; KDown = 1002; KRight = 1003; KLeft = 1004;
   KHome = 1005; KEnd = 1006; KPgUp = 1007; KPgDn = 1008; KDel = 1009; KNone = 1010;
   KPaste = 1011;  (* the start of a bracketed paste of the terminal *)
+  KEsc = 1012;    (* Esc alone *)
   Shift = 1; Alt = 2; Ctrl = 4;  (* mods *)
 
 VAR
@@ -38,7 +40,7 @@ VAR
   anchor: LONGINT;
   aLn, aCol, cCol: LONGINT;  (* a block: the line and column of its anchor, the column of the caret *)
   msg, search: ARRAY 256 OF CHAR;
-  saved: termios.Termios;
+  saved, rawT, timedT: termios.Termios;  (* the terminal before, raw, raw with a short timeout *)
   obuf: ARRAY 65536 OF CHAR; opos: LONGINT;
   W: Texts.Writer;
 
@@ -104,6 +106,7 @@ BEGIN
   IF termios.Get(0, saved) # 0 THEN RETURN FALSE END;
   t := saved; termios.MakeRaw(t);
   IF termios.Set(0, t) # 0 THEN RETURN FALSE END;
+  rawT := t; timedT := t; termios.Timeout(timedT, 1);
   raw := TRUE; Kernel.InstallTermHandler(Restore);
   CSI("?1049h"); CSI("?2004h"); Flush;  (* the alternate screen (the old contents come back at the end), bracketed paste *)
   RETURN TRUE
@@ -124,7 +127,8 @@ BEGIN
   mods := 0;
   c := ReadByte();
   IF c # ORD(ESC) THEN RETURN c END;
-  c := ReadByte();
+  n := termios.Set(0, timedT); c := ReadByte(); n := termios.Set(0, rawT);  (* the rest of a sequence comes at once *)
+  IF c < 0 THEN RETURN KEsc END;
   IF c = ORD("O") THEN
     c := ReadByte();
     IF c = ORD("A") THEN RETURN KUp ELSIF c = ORD("B") THEN RETURN KDown
@@ -374,7 +378,7 @@ BEGIN
       IF ln < last THEN Texts.Write(W, CR); Texts.Append(blockText, W.buf) END;
       ls := NextLine(ls); INC(ln)
     END;
-    clipBlock := TRUE; ToTerminal(blockText, 0, blockText.len)
+    clipBlock := TRUE; marking := FALSE; ToTerminal(blockText, 0, blockText.len)
   ELSE
     SelRange(b, e); Texts.Save(T, b, e, clip); clipBlock := FALSE; ToTerminal(T, b, e)
   END
@@ -390,7 +394,7 @@ BEGIN
     Delete(PosAtCol(ls, l), PosAtCol(ls, r));
     ls := NextLine(ls); INC(ln)
   END;
-  aCol := l; cur := LineStartNo(cl); BlockCaret(l)
+  aCol := l; cur := LineStartNo(cl); BlockCaret(l); marking := FALSE
 END DeleteBlock;
 
 (* delete the selection *)
@@ -414,7 +418,7 @@ BEGIN
     ls := NextLine(ls); INC(ln)
   END;
   cur := LineStartNo(cl); cur := NextPos(PosAtCol(cur, l));
-  aCol := Col(cur); cCol := aCol
+  aCol := Col(cur); cCol := aCol; marking := FALSE
 END BlockType;
 
 (* Backspace (back) or Delete in a block of width 0: the character before or at its column, in
@@ -433,7 +437,7 @@ BEGIN
   END;
   cur := LineStartNo(cl);
   IF back THEN cur := PosAtCol(cur, l - 1) ELSE cur := PosAtCol(cur, l) END;
-  aCol := Col(cur); cCol := aCol
+  aCol := Col(cur); cCol := aCol; marking := FALSE
 END BlockErase;
 
 (* the clipboard at the caret; a block goes into the following lines at the caret's column,
@@ -722,7 +726,7 @@ BEGIN
   Str("^O  Write Out: store the file; in the prompt ^T stores as plain or Oberon text"); Ch(CR); Ch(LF);
   Str("^X  Exit, asking to store changes"); Ch(CR); Ch(LF);
   Str("Shift+arrows, Home, End, PgUp, PgDn  select;  ^A  select all"); Ch(CR); Ch(LF);
-  Str("^B  a block (columns over lines): the arrows extend it, ^B ends it (also Alt+Shift+...)"); Ch(CR); Ch(LF);
+  Str("^B  a block: the arrows extend it; after typing they end it, as Esc does (also Alt+Shift)"); Ch(CR); Ch(LF);
   Str("^C  Copy the selection (also to the terminal); without one: line, column, position"); Ch(CR); Ch(LF);
   Str("^K  Cut the selection; without one the line (^K again adds the next line)"); Ch(CR); Ch(LF);
   Str("^V  Paste (also ^U); a block goes into the lines below at the caret's column"); Ch(CR); Ch(LF);
@@ -810,7 +814,7 @@ BEGIN
       block := TRUE; marking := TRUE
     ELSE selOn := FALSE; StartSel(TRUE); marking := TRUE
     END;
-    IF marking THEN msg := "Block: arrows extend it, ^B ends it" END
+    IF marking THEN msg := "Block: arrows extend it; after typing they end it, as Esc and ^B do" END
   ELSIF k = 1 THEN  (* ^A: select all *)
     ClearSel; anchor := 0; cur := T.len; selOn := TRUE
   ELSIF (k = 7FH) OR (k = 8) THEN  (* Backspace *)
@@ -839,6 +843,7 @@ BEGIN
     END
   ELSIF (k = 16H) OR (k = 15H) THEN Paste; ClearSel  (* ^V, ^U *)
   ELSIF k = KPaste THEN TerminalPaste; ClearSel
+  ELSIF k = KEsc THEN ClearSel
   ELSIF k = 0FH THEN IF WriteOut() THEN END
   ELSIF k = 17H THEN ClearSel; Find
   ELSIF k = 7 THEN ShowHelp
