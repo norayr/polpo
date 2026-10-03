@@ -5,8 +5,13 @@ MODULE xxs;  (** a small nano-like editor for the console, the size that fits ev
 
    Plain files stay plain, Oberon texts keep their fonts and colours; in the Write Out
    prompt (^O), ^T switches between storing as Oberon text and as plain text.
-   Keys as in nano: ^O write out, ^X exit, ^K cut line, ^U paste, ^W where is, ^C location,
-   ^G help, ^A/^E line start/end, ^Y/^V page up/down, arrows, Home, End, PgUp, PgDn. *)
+   Keys as in nano: ^O write out, ^X exit, ^W where is, ^G help, ^A/^E line start/end, ^Y page up,
+   arrows, Home, End, PgUp, PgDn; Ctrl+Left/Right by words.
+   Selection as in TextFrames: Shift with the movement keys selects; Alt+Shift selects a block
+   (columns over lines). ^C copies the selection (without one: the location), ^K cuts it (without
+   one: the line), ^V and ^U paste. Typing, Backspace and Delete replace a selection; with a block
+   they act on every line of it (a block of width 0 types into all its lines: indenting). Copies
+   go to the terminal's clipboard too (OSC 52); a paste from the terminal is taken as it is. *)
 
 IMPORT Kernel, Linux0, Files, Objects := objects, Texts := texts, termios, SYSTEM;
 
@@ -15,6 +20,8 @@ CONST
   (* keys above the characters *)
   KUp = 1001; KDown = 1002; KRight = 1003; KLeft = 1004;
   KHome = 1005; KEnd = 1006; KPgUp = 1007; KPgDn = 1008; KDel = 1009; KNone = 1010;
+  KPaste = 1011;  (* the start of a bracketed paste of the terminal *)
+  Shift = 1; Alt = 2; Ctrl = 4;  (* mods *)
 
 VAR
   T: Texts.Text;
@@ -22,7 +29,12 @@ VAR
   plain, modified, running, raw: BOOLEAN;
   cur, top, hcol, goalCol: LONGINT;  (* caret, first line shown, first column shown, column for up/down *)
   rows, cols, height: LONGINT;  (* terminal size, lines of text shown *)
-  cutBuf: Texts.Buffer; lastCut: BOOLEAN;
+  clip: Texts.Buffer; lastCut: BOOLEAN;  (* what ^C, ^K copied; ^K of lines adds to it *)
+  clipBlock: BOOLEAN; blockText: Texts.Text;  (* a copied block: its rows, separated by CR *)
+  mods: LONGINT;  (* Shift, Alt, Ctrl with the last key *)
+  selOn, block: BOOLEAN;  (* a selection: from anchor to cur, or a block *)
+  anchor: LONGINT;
+  aLn, aCol, cCol: LONGINT;  (* a block: the line and column of its anchor, the column of the caret *)
   msg, search: ARRAY 256 OF CHAR;
   saved: termios.Termios;
   obuf: ARRAY 65536 OF CHAR; opos: LONGINT;
@@ -79,7 +91,7 @@ VAR r: LONGINT;
 BEGIN
   IF raw THEN
     raw := FALSE;
-    Attr(0); CSI("?1049l"); Flush;  (* leave the alternate screen *)
+    Attr(0); CSI("?2004l"); CSI("?1049l"); Flush;  (* no bracketed paste, leave the alternate screen *)
     r := termios.Set(0, saved)
   END
 END Restore;
@@ -91,7 +103,7 @@ BEGIN
   t := saved; termios.MakeRaw(t);
   IF termios.Set(0, t) # 0 THEN RETURN FALSE END;
   raw := TRUE; Kernel.InstallTermHandler(Restore);
-  CSI("?1049h"); Flush;  (* the alternate screen, the old contents come back at the end *)
+  CSI("?1049h"); CSI("?2004h"); Flush;  (* the alternate screen (the old contents come back at the end), bracketed paste *)
   RETURN TRUE
 END Raw;
 
@@ -105,8 +117,9 @@ END ReadByte;
 
 (* a key: a character, or KUp .. KDel; escape sequences of xterm and the Linux console *)
 PROCEDURE ReadKey(): LONGINT;
-VAR c, n: LONGINT;
+VAR c, n, m: LONGINT;
 BEGIN
+  mods := 0;
   c := ReadByte();
   IF c # ORD(ESC) THEN RETURN c END;
   c := ReadByte();
@@ -120,8 +133,9 @@ BEGIN
   ELSIF c = ORD("[") THEN
     n := 0; c := ReadByte();
     WHILE (c >= ORD("0")) & (c <= ORD("9")) DO n := n * 10 + c - ORD("0"); c := ReadByte() END;
-    WHILE c = ORD(";") DO  (* modifiers are ignored *)
-      c := ReadByte(); WHILE (c >= ORD("0")) & (c <= ORD("9")) DO c := ReadByte() END
+    WHILE c = ORD(";") DO  (* xterm modifiers: 1 + Shift 1, Alt 2, Ctrl 4 *)
+      m := 0; c := ReadByte(); WHILE (c >= ORD("0")) & (c <= ORD("9")) DO m := m * 10 + c - ORD("0"); c := ReadByte() END;
+      IF m > 1 THEN mods := m - 1 END
     END;
     IF c = ORD("A") THEN RETURN KUp ELSIF c = ORD("B") THEN RETURN KDown
     ELSIF c = ORD("C") THEN RETURN KRight ELSIF c = ORD("D") THEN RETURN KLeft
@@ -129,6 +143,7 @@ BEGIN
     ELSIF c = ORD("~") THEN
       IF (n = 1) OR (n = 7) THEN RETURN KHome ELSIF (n = 4) OR (n = 8) THEN RETURN KEnd
       ELSIF n = 3 THEN RETURN KDel ELSIF n = 5 THEN RETURN KPgUp ELSIF n = 6 THEN RETURN KPgDn
+      ELSIF n = 200 THEN RETURN KPaste
       END
     END;
     RETURN KNone
@@ -233,23 +248,270 @@ BEGIN
   IF plain THEN RETURN LF ELSE RETURN CR END
 END Newline;
 
-(* insert c at the caret, in the looks of the character before *)
-PROCEDURE Insert(c: CHAR);
+(* W writes in the looks of the character before pos *)
+PROCEDURE LooksAt(pos: LONGINT);
 VAR R: Texts.Reader; ch: CHAR; lib: Objects.Library;
 BEGIN
-  IF cur > 0 THEN Texts.OpenReader(R, T, cur - 1) ELSE Texts.OpenReader(R, T, 0) END;
+  IF pos > 0 THEN Texts.OpenReader(R, T, pos - 1) ELSE Texts.OpenReader(R, T, 0) END;
   Texts.Read(R, ch); lib := R.lib;
   IF (T.len = 0) OR R.eot THEN lib := NIL; R.col := 15; R.voff := 0 END;
   IF (lib = NIL) & ~plain THEN lib := Objects.ThisLibrary("Oberon10.Scn.Fnt") END;
-  Texts.SetFont(W, lib); Texts.SetColor(W, R.col); Texts.SetOffset(W, R.voff);
-  Texts.Write(W, c); Texts.Insert(T, cur, W.buf);
-  INC(cur); modified := TRUE
+  Texts.SetFont(W, lib); Texts.SetColor(W, R.col); Texts.SetOffset(W, R.voff)
+END LooksAt;
+
+(* insert c at pos, in the looks of the character before *)
+PROCEDURE InsertAt(pos: LONGINT; c: CHAR);
+BEGIN
+  LooksAt(pos); Texts.Write(W, c); Texts.Insert(T, pos, W.buf); modified := TRUE
+END InsertAt;
+
+(* insert c at the caret *)
+PROCEDURE Insert(c: CHAR);
+BEGIN
+  InsertAt(cur, c); INC(cur)
 END Insert;
 
 PROCEDURE Delete(beg, end: LONGINT);
 BEGIN
   IF end > beg THEN Texts.Delete(T, beg, end); modified := TRUE END
 END Delete;
+
+(* ----- selection ----- *)
+
+PROCEDURE LineStartNo(n: LONGINT): LONGINT;  (* the start of line n (1-based), -1 beyond the end *)
+VAR p: LONGINT;
+BEGIN
+  p := 0;
+  WHILE (n > 1) & (p >= 0) DO p := NextLine(p); DEC(n) END;
+  RETURN p
+END LineStartNo;
+
+PROCEDURE SelRange(VAR b, e: LONGINT);  (* the selected stretch *)
+BEGIN
+  IF anchor < cur THEN b := anchor; e := cur ELSE b := cur; e := anchor END
+END SelRange;
+
+(* the block: its first and last line (numbers), its columns l (included) to r (excluded) *)
+PROCEDURE BlockArea(VAR first, last, l, r: LONGINT);
+VAR cl: LONGINT;
+BEGIN
+  cl := LineNo(cur);
+  IF aLn <= cl THEN first := aLn; last := cl ELSE first := cl; last := aLn END;
+  IF aCol <= cCol THEN l := aCol; r := cCol ELSE l := cCol; r := aCol END
+END BlockArea;
+
+PROCEDURE EndCol(ls: LONGINT): LONGINT;  (* the column of the end of the line starting at ls *)
+BEGIN RETURN Col(LineEnd(ls))
+END EndCol;
+
+(* start a stretch (Shift) or a block (Alt+Shift) at the caret, unless one of that kind is there *)
+PROCEDURE StartSel(blk: BOOLEAN);
+BEGIN
+  IF ~selOn OR (block # blk) THEN
+    selOn := TRUE; block := blk; anchor := cur;
+    aLn := LineNo(cur); IF goalCol >= 0 THEN aCol := goalCol ELSE aCol := Col(cur) END; cCol := aCol
+  END
+END StartSel;
+
+PROCEDURE ClearSel;
+BEGIN selOn := FALSE; block := FALSE
+END ClearSel;
+
+(* the block of the caret's line moves to column c: cur follows it *)
+PROCEDURE BlockCaret(c: LONGINT);
+BEGIN
+  IF c < 0 THEN c := 0 END;
+  cCol := c; cur := PosAtCol(LineStart(cur), c)
+END BlockCaret;
+
+(* ----- the terminal's clipboard (OSC 52) ----- *)
+
+PROCEDURE B64(v: LONGINT): CHAR;
+BEGIN
+  IF v < 26 THEN RETURN CHR(ORD("A") + v) ELSIF v < 52 THEN RETURN CHR(ORD("a") + v - 26)
+  ELSIF v < 62 THEN RETURN CHR(ORD("0") + v - 52) ELSIF v = 62 THEN RETURN "+" ELSE RETURN "/"
+  END
+END B64;
+
+(* the characters of t from beg to end, line ends as LF, to the terminal's clipboard *)
+PROCEDURE ToTerminal(t: Texts.Text; beg, end: LONGINT);
+VAR R: Texts.Reader; c: CHAR; acc, n, v: LONGINT;
+BEGIN
+  IF end - beg > 100000 THEN RETURN END;  (* terminals take little *)
+  Ch(ESC); Str("]52;c;");
+  Texts.OpenReader(R, t, beg); acc := 0; n := 0;
+  WHILE beg < end DO
+    Texts.Read(R, c); IF c = CR THEN c := LF END;
+    acc := acc * 256 + ORD(c); INC(n);
+    IF n = 3 THEN
+      Ch(B64(acc DIV 40000H)); Ch(B64(acc DIV 1000H MOD 64)); Ch(B64(acc DIV 40H MOD 64)); Ch(B64(acc MOD 64));
+      acc := 0; n := 0
+    END;
+    INC(beg)
+  END;
+  IF n = 1 THEN v := acc * 10000H; Ch(B64(v DIV 40000H)); Ch(B64(v DIV 1000H MOD 64)); Str("==")
+  ELSIF n = 2 THEN v := acc * 100H; Ch(B64(v DIV 40000H)); Ch(B64(v DIV 1000H MOD 64)); Ch(B64(v DIV 40H MOD 64)); Ch("=")
+  END;
+  Ch(7X); Flush
+END ToTerminal;
+
+(* ----- copy, cut, paste ----- *)
+
+(* the selection into the clipboard (and the terminal's) *)
+PROCEDURE CopySel;
+VAR b, e, first, last, l, r, ls, ln: LONGINT; buf: Texts.Buffer;
+BEGIN
+  NEW(clip); Texts.OpenBuf(clip);
+  IF block THEN
+    BlockArea(first, last, l, r);
+    NEW(blockText); Texts.Open(blockText, "");
+    ls := LineStartNo(first); ln := first;
+    WHILE (ln <= last) & (ls >= 0) DO
+      b := PosAtCol(ls, l); e := PosAtCol(ls, r);
+      IF e > b THEN NEW(buf); Texts.OpenBuf(buf); Texts.Save(T, b, e, buf); Texts.Append(blockText, buf) END;
+      IF ln < last THEN Texts.Write(W, CR); Texts.Append(blockText, W.buf) END;
+      ls := NextLine(ls); INC(ln)
+    END;
+    clipBlock := TRUE; ToTerminal(blockText, 0, blockText.len)
+  ELSE
+    SelRange(b, e); Texts.Save(T, b, e, clip); clipBlock := FALSE; ToTerminal(T, b, e)
+  END
+END CopySel;
+
+(* delete the block's columns on its lines; it keeps width 0 at its left column *)
+PROCEDURE DeleteBlock;
+VAR first, last, l, r, ls, ln, cl: LONGINT;
+BEGIN
+  BlockArea(first, last, l, r); cl := LineNo(cur);
+  ls := LineStartNo(first); ln := first;
+  WHILE (ln <= last) & (ls >= 0) DO
+    Delete(PosAtCol(ls, l), PosAtCol(ls, r));
+    ls := NextLine(ls); INC(ln)
+  END;
+  aCol := l; cur := LineStartNo(cl); BlockCaret(l)
+END DeleteBlock;
+
+(* delete the selection *)
+PROCEDURE DeleteSel;
+VAR b, e: LONGINT;
+BEGIN
+  IF block THEN DeleteBlock
+  ELSE SelRange(b, e); Delete(b, e); cur := b; ClearSel
+  END
+END DeleteSel;
+
+(* type c into every line of the block that reaches its column, after deleting its columns *)
+PROCEDURE BlockType(c: CHAR);
+VAR first, last, l, r, ls, ln, cl: LONGINT;
+BEGIN
+  IF aCol # cCol THEN DeleteBlock END;
+  BlockArea(first, last, l, r); cl := LineNo(cur);
+  ls := LineStartNo(first); ln := first;
+  WHILE (ln <= last) & (ls >= 0) DO
+    IF EndCol(ls) >= l THEN InsertAt(PosAtCol(ls, l), c) END;
+    ls := NextLine(ls); INC(ln)
+  END;
+  cur := LineStartNo(cl); cur := NextPos(PosAtCol(cur, l));
+  aCol := Col(cur); cCol := aCol
+END BlockType;
+
+(* Backspace (back) or Delete in a block of width 0: the character before or at its column, in
+   every line that has one *)
+PROCEDURE BlockErase(back: BOOLEAN);
+VAR first, last, l, r, ls, ln, cl, p: LONGINT;
+BEGIN
+  BlockArea(first, last, l, r); cl := LineNo(cur);
+  IF back & (l = 0) THEN RETURN END;
+  ls := LineStartNo(first); ln := first;
+  WHILE (ln <= last) & (ls >= 0) DO
+    IF back & (EndCol(ls) >= l) THEN p := PosAtCol(ls, l - 1); Delete(p, NextPos(p))
+    ELSIF ~back & (EndCol(ls) > l) THEN p := PosAtCol(ls, l); Delete(p, NextPos(p))
+    END;
+    ls := NextLine(ls); INC(ln)
+  END;
+  cur := LineStartNo(cl);
+  IF back THEN cur := PosAtCol(cur, l - 1) ELSE cur := PosAtCol(cur, l) END;
+  aCol := Col(cur); cCol := aCol
+END BlockErase;
+
+(* the clipboard at the caret; a block goes into the following lines at the caret's column,
+   lines are lengthened with blanks and added at the end as needed *)
+PROCEDURE Paste;
+VAR buf: Texts.Buffer; R: Texts.Reader; c: CHAR; col, ln, ls, p, n, rowEnd: LONGINT;
+BEGIN
+  IF selOn THEN DeleteSel END;
+  IF clip = NIL THEN RETURN END;
+  IF clipBlock THEN
+    col := Col(cur); ln := LineNo(cur); p := 0;
+    WHILE p <= blockText.len DO
+      rowEnd := p; Texts.OpenReader(R, blockText, p); Texts.Read(R, c);
+      WHILE ~R.eot & (c # CR) DO INC(rowEnd); Texts.Read(R, c) END;
+      ls := LineStartNo(ln);
+      IF ls < 0 THEN InsertAt(T.len, Newline()); ls := LineStartNo(ln) END;
+      WHILE EndCol(ls) < col DO InsertAt(LineEnd(ls), " ") END;
+      IF rowEnd > p THEN
+        NEW(buf); Texts.OpenBuf(buf); Texts.Save(blockText, p, rowEnd, buf);
+        Texts.Insert(T, PosAtCol(ls, col), buf); modified := TRUE
+      END;
+      p := rowEnd + 1; INC(ln)
+    END;
+    cur := PosAtCol(LineStartNo(LineNo(cur)), col)
+  ELSE
+    NEW(buf); Texts.OpenBuf(buf); Texts.Copy(clip, buf);
+    n := buf.len; Texts.Insert(T, cur, buf); cur := cur + n; modified := TRUE
+  END
+END Paste;
+
+(* a paste of the terminal (bracketed: up to ESC [ 201 ~), inserted as it is; CR LF, CR and LF
+   are line ends *)
+PROCEDURE TerminalPaste;
+VAR c, st, n, i: LONGINT; pending: BOOLEAN; endSeq: ARRAY 8 OF CHAR;
+
+  PROCEDURE Put(c: LONGINT);
+  BEGIN
+    IF c = 0DH THEN Texts.Write(W, Newline()); INC(n); pending := TRUE
+    ELSIF (c = 0AH) & pending THEN pending := FALSE  (* the LF of CR LF *)
+    ELSIF c = 0AH THEN Texts.Write(W, Newline()); INC(n)
+    ELSE Texts.Write(W, CHR(c)); INC(n); pending := FALSE
+    END
+  END Put;
+
+BEGIN
+  IF selOn THEN DeleteSel END;
+  endSeq[0] := ESC; endSeq[1] := "["; endSeq[2] := "2"; endSeq[3] := "0"; endSeq[4] := "1"; endSeq[5] := "~";
+  LooksAt(cur); n := 0; st := 0; pending := FALSE;
+  LOOP
+    c := ReadByte();
+    IF c < 0 THEN EXIT END;
+    IF c = ORD(endSeq[st]) THEN
+      INC(st); IF st = 6 THEN EXIT END
+    ELSE  (* not the end: what matched so far is text *)
+      i := 0; WHILE i < st DO Put(ORD(endSeq[i])); INC(i) END;
+      IF c = 1BH THEN st := 1 ELSE st := 0; Put(c) END
+    END
+  END;
+  IF n > 0 THEN Texts.Insert(T, cur, W.buf); cur := cur + n; modified := TRUE END
+END TerminalPaste;
+
+(* ----- words ----- *)
+
+PROCEDURE IsWord(c: CHAR): BOOLEAN;
+BEGIN RETURN (c >= "0") & (c <= "9") OR (CAP(c) >= "A") & (CAP(c) <= "Z") OR (c = "_") OR (ORD(c) >= 80H)
+END IsWord;
+
+PROCEDURE WordRight(pos: LONGINT): LONGINT;
+BEGIN
+  WHILE (pos < T.len) & ~IsWord(CharAt(pos)) DO INC(pos) END;
+  WHILE (pos < T.len) & IsWord(CharAt(pos)) DO INC(pos) END;
+  RETURN pos
+END WordRight;
+
+PROCEDURE WordLeft(pos: LONGINT): LONGINT;
+BEGIN
+  WHILE (pos > 0) & ~IsWord(CharAt(pos - 1)) DO DEC(pos) END;
+  WHILE (pos > 0) & IsWord(CharAt(pos - 1)) DO DEC(pos) END;
+  RETURN pos
+END WordLeft;
 
 (* ----- screen ----- *)
 
@@ -274,14 +536,28 @@ BEGIN
   END
 END Looks;
 
-PROCEDURE DrawLine(pos: LONGINT);
-VAR R: Texts.Reader; c: CHAR; col, n: LONGINT; show: BOOLEAN; lib: Objects.Library; lcol: SHORTINT;
+(* the line starting at pos; positions hb..he are selected (reverse), eolSel: its line end too, ucol:
+   the column of a block of width 0 (underlined), or -1 *)
+PROCEDURE DrawLine(pos, hb, he: LONGINT; eolSel: BOOLEAN; ucol: LONGINT);
+VAR R: Texts.Reader; c: CHAR; col, n, p: LONGINT; show, sel, under, curSel, curUnder: BOOLEAN; lib: Objects.Library; lcol: SHORTINT;
+
+  PROCEDURE Set;  (* the attributes for sel, under and the looks of R *)
+  BEGIN
+    IF (sel # curSel) OR (under # curUnder) OR ~plain & ((R.lib # lib) OR (R.col # lcol)) THEN
+      Attr(0); IF ~plain THEN lib := R.lib; lcol := R.col; Looks(R) END;
+      IF sel THEN Attr(7) END;
+      IF under THEN Attr(4) END;
+      curSel := sel; curUnder := under
+    END
+  END Set;
+
 BEGIN
-  col := 0; show := FALSE; lib := NIL; lcol := 15;
+  col := 0; show := FALSE; lib := NIL; lcol := 15; p := pos; curSel := FALSE; curUnder := FALSE;
   IF pos < T.len THEN
     Texts.OpenReader(R, T, pos); Texts.Read(R, c);
     WHILE ~R.eot & ~IsEol(c) & (col < hcol + cols) DO
-      IF ~plain & ((R.lib # lib) OR (R.col # lcol)) THEN lib := R.lib; lcol := R.col; Looks(R) END;
+      sel := (p >= hb) & (p < he); under := (col = ucol) & ~Cont(c);
+      IF ~Cont(c) THEN Set END;
       IF ~Texts.IsCharacterLibrary(R.lib) THEN  (* an object *)
         IF col >= hcol THEN Ch("?") END; INC(col)
       ELSIF c = TAB THEN
@@ -296,11 +572,13 @@ BEGIN
         IF show THEN Ch(c) END;
         INC(col)
       END;
-      Texts.Read(R, c)
-    END;
-    IF ~plain THEN Attr(0) END
+      Texts.Read(R, c); INC(p)
+    END
   END;
-  CSI("K")
+  IF (eolSel OR (ucol = col)) & (col >= hcol) & (col < hcol + cols) THEN  (* the line end *)
+    Attr(0); IF eolSel THEN Attr(7) ELSE Attr(4) END; Ch(" ")
+  END;
+  Attr(0); CSI("K")
 END DrawLine;
 
 PROCEDURE Append(VAR s: ARRAY OF CHAR; t: ARRAY OF CHAR);
@@ -326,7 +604,7 @@ BEGIN
     WHILE (p # ls) & (p >= 0) DO p := NextLine(p); INC(n) END;
     WHILE n >= height DO top := NextLine(top); DEC(n) END
   END;
-  c := Col(cur);
+  IF selOn & block THEN c := cCol ELSE c := Col(cur) END;
   IF c < hcol THEN hcol := c - c MOD (cols DIV 2)
   ELSIF c >= hcol + cols - 1 THEN hcol := c - cols DIV 2
   END;
@@ -334,7 +612,7 @@ BEGIN
 END Follow;
 
 PROCEDURE Draw;
-VAR i, p: LONGINT;
+VAR i, p, ln, sb, se, first, last, l, r, hb, he, ucol, e: LONGINT; eolSel: BOOLEAN;
 BEGIN
   GetSize; Follow;
   CSI("?25l"); Goto(1, 1);
@@ -342,19 +620,32 @@ BEGIN
   IF plain THEN Str("  [plain text]") ELSE Str("  [Oberon text]") END;
   IF modified THEN Str("  Modified") END;
   CSI("K"); Attr(0);
-  i := 0; p := top;
+  IF selOn & ~block THEN SelRange(sb, se) ELSE sb := 0; se := 0 END;
+  IF selOn & block THEN BlockArea(first, last, l, r) END;
+  i := 0; p := top; ln := LineNo(top);
   WHILE i < height DO
     Goto(i + 2, 1);
-    IF p >= 0 THEN DrawLine(p); p := NextLine(p) ELSE CSI("K") END;
-    INC(i)
+    IF p >= 0 THEN
+      hb := sb; he := se; e := LineEnd(p); eolSel := (e >= sb) & (e < se) & (e < T.len); ucol := -1;
+      IF selOn & block & (ln >= first) & (ln <= last) THEN
+        hb := PosAtCol(p, l); he := PosAtCol(p, r); eolSel := FALSE;
+        IF l = r THEN ucol := l END
+      END;
+      DrawLine(p, hb, he, eolSel, ucol); p := NextLine(p)
+    ELSE CSI("K")
+    END;
+    INC(i); INC(ln)
   END;
   Goto(rows - 2, 1); IF msg # "" THEN Attr(7); Str(" "); Str(msg); Str(" "); Attr(0) END; CSI("K");
   Goto(rows - 1, 1);
-  Help("^G", "Help"); Help("^O", "Write Out"); Help("^W", "Where Is"); Help("^K", "Cut"); Help("^U", "Paste"); Help("^C", "Location");
+  Help("^G", "Help"); Help("^O", "Write Out"); Help("^W", "Where Is"); Help("^K", "Cut"); Help("^C", "Copy"); Help("^V", "Paste");
   CSI("K"); Goto(rows, 1);
-  Help("^X", "Exit"); Help("^A", "Line Start"); Help("^E", "Line End"); Help("^Y", "Prev Page"); Help("^V", "Next Page");
+  Help("^X", "Exit"); Help("^A", "Line Start"); Help("^E", "Line End"); Help("Shift", "Select"); Help("Alt+Shift", "Block");
   CSI("K");
-  Goto(LineNo(cur) - LineNo(top) + 2, Col(cur) - hcol + 1); CSI("?25h");
+  IF selOn & block THEN Goto(LineNo(cur) - LineNo(top) + 2, cCol - hcol + 1)
+  ELSE Goto(LineNo(cur) - LineNo(top) + 2, Col(cur) - hcol + 1)
+  END;
+  CSI("?25h");
   Flush
 END Draw;
 
@@ -428,12 +719,15 @@ BEGIN
   Str("xxs - a nano-like editor for Oberon texts and plain files"); Ch(CR); Ch(LF); Ch(CR); Ch(LF);
   Str("^O  Write Out: store the file; in the prompt ^T stores as plain or Oberon text"); Ch(CR); Ch(LF);
   Str("^X  Exit, asking to store changes"); Ch(CR); Ch(LF);
-  Str("^K  Cut the line; ^K again adds the next line to the cut"); Ch(CR); Ch(LF);
-  Str("^U  Paste the cut lines at the caret"); Ch(CR); Ch(LF);
+  Str("Shift+arrows, Home, End, PgUp, PgDn  select; Alt+Shift+...  select a block (columns)"); Ch(CR); Ch(LF);
+  Str("^C  Copy the selection (also to the terminal); without one: line, column, position"); Ch(CR); Ch(LF);
+  Str("^K  Cut the selection; without one the line (^K again adds the next line)"); Ch(CR); Ch(LF);
+  Str("^V  Paste (also ^U); a block goes into the lines below at the caret's column"); Ch(CR); Ch(LF);
+  Str("    Typing, Backspace, Delete replace the selection; with a block on every line of"); Ch(CR); Ch(LF);
+  Str("    it: a block of width 0 types into all its lines (indent), Delete takes columns out"); Ch(CR); Ch(LF);
   Str("^W  Where Is: search forward, from the top again at the end"); Ch(CR); Ch(LF);
-  Str("^C  Location: line, column and character position"); Ch(CR); Ch(LF);
-  Str("^A  Line Start   ^E  Line End   (also Home, End)"); Ch(CR); Ch(LF);
-  Str("^Y  Prev Page    ^V  Next Page  (also PgUp, PgDn)"); Ch(CR); Ch(LF);
+  Str("^A  Line Start   ^E  Line End   (also Home, End)   Ctrl+Left/Right  by words"); Ch(CR); Ch(LF);
+  Str("^Y  Prev Page    (also PgUp; Next Page: PgDn)"); Ch(CR); Ch(LF);
   Str("^L  Refresh the screen"); Ch(CR); Ch(LF); Ch(CR); Ch(LF);
   Str("Plain files stay plain; Oberon texts keep their fonts and colours, new text"); Ch(CR); Ch(LF);
   Str("gets the looks of the character before it."); Ch(CR); Ch(LF); Ch(CR); Ch(LF);
@@ -441,23 +735,22 @@ BEGIN
   k := ReadKey()
 END ShowHelp;
 
-PROCEDURE Key(k: LONGINT);
-VAR p, ls, ln, n: LONGINT; buf: Texts.Buffer; cut: BOOLEAN;
+(* move the caret for a movement key k (as in a stretch) *)
+PROCEDURE Move(k: LONGINT);
+VAR p, ls, n: LONGINT;
 BEGIN
-  cut := FALSE; msg := "";
-  IF (k # KUp) & (k # KDown) & (k # KPgUp) & (k # KPgDn) & (k # 19H) & (k # 16H) THEN goalCol := -1 END;
   IF (k = KUp) OR (k = KDown) THEN
     IF goalCol < 0 THEN goalCol := Col(cur) END;
     ls := LineStart(cur);
     IF k = KUp THEN IF ls > 0 THEN cur := PosAtCol(LineStart(ls - 1), goalCol) END
     ELSE p := NextLine(cur); IF p >= 0 THEN cur := PosAtCol(p, goalCol) END
     END
-  ELSIF (k = KPgUp) OR (k = 19H) OR (k = KPgDn) OR (k = 16H) THEN
+  ELSIF (k = KPgUp) OR (k = 19H) OR (k = KPgDn) THEN
     IF goalCol < 0 THEN goalCol := Col(cur) END;
     n := height - 1; IF n < 1 THEN n := 1 END;
     p := LineStart(cur);
     WHILE n > 0 DO
-      IF (k = KPgUp) OR (k = 19H) THEN
+      IF k # KPgDn THEN
         IF p > 0 THEN p := LineStart(p - 1); IF top > 0 THEN top := LineStart(top - 1) END END
       ELSE
         ls := NextLine(p); IF ls >= 0 THEN p := ls; ls := NextLine(top); IF ls >= 0 THEN top := ls END END
@@ -465,32 +758,76 @@ BEGIN
       DEC(n)
     END;
     cur := PosAtCol(p, goalCol)
-  ELSIF k = KLeft THEN cur := PrevPos(cur)
-  ELSIF k = KRight THEN cur := NextPos(cur)
+  ELSIF k = KLeft THEN IF ODD(mods DIV Ctrl) THEN cur := WordLeft(cur) ELSE cur := PrevPos(cur) END
+  ELSIF k = KRight THEN IF ODD(mods DIV Ctrl) THEN cur := WordRight(cur) ELSE cur := NextPos(cur) END
   ELSIF (k = KHome) OR (k = 1) THEN cur := LineStart(cur)
   ELSIF (k = KEnd) OR (k = 5) THEN cur := LineEnd(cur)
-  ELSIF (k = 7FH) OR (k = 8) THEN  (* Backspace *)
-    IF cur > 0 THEN p := PrevPos(cur); Delete(p, cur); cur := p END
-  ELSIF k = KDel THEN
-    IF cur < T.len THEN Delete(cur, NextPos(cur)) END
-  ELSIF (k = 0DH) OR (k = 0AH) THEN Insert(Newline())
-  ELSIF k = 9 THEN Insert(TAB)
-  ELSIF k = 0BH THEN  (* ^K cut the line *)
-    ls := LineStart(cur); p := NextLine(cur); IF p < 0 THEN p := T.len END;
-    IF p > ls THEN
-      IF ~lastCut OR (cutBuf = NIL) THEN NEW(cutBuf); Texts.OpenBuf(cutBuf) END;
-      NEW(buf); Texts.OpenBuf(buf); Texts.Save(T, ls, p, buf); Texts.Copy(buf, cutBuf);
-      Delete(ls, p); cur := ls
+  END
+END Move;
+
+(* move the caret of a block: columns may lie beyond the end of a line *)
+PROCEDURE MoveBlock(k: LONGINT);
+VAR ls, p, n: LONGINT;
+BEGIN
+  ls := LineStart(cur);
+  IF k = KLeft THEN BlockCaret(cCol - 1)
+  ELSIF k = KRight THEN BlockCaret(cCol + 1)
+  ELSIF k = KHome THEN BlockCaret(0)
+  ELSIF k = KEnd THEN BlockCaret(EndCol(ls))
+  ELSE  (* up, down, pages *)
+    IF (k = KUp) OR (k = KDown) THEN n := 1 ELSE n := height - 1; IF n < 1 THEN n := 1 END END;
+    WHILE n > 0 DO
+      IF (k = KUp) OR (k = KPgUp) THEN IF ls > 0 THEN ls := LineStart(ls - 1) END
+      ELSE p := NextLine(ls); IF p >= 0 THEN ls := p END
+      END;
+      DEC(n)
     END;
-    cut := TRUE
-  ELSIF k = 15H THEN  (* ^U paste *)
-    IF cutBuf # NIL THEN
-      NEW(buf); Texts.OpenBuf(buf); Texts.Copy(cutBuf, buf);
-      n := buf.len; Texts.Insert(T, cur, buf); cur := cur + n; modified := TRUE
+    cur := ls; BlockCaret(cCol)
+  END
+END MoveBlock;
+
+PROCEDURE IsMove(k: LONGINT): BOOLEAN;
+BEGIN
+  RETURN (k = KUp) OR (k = KDown) OR (k = KLeft) OR (k = KRight) OR (k = KHome) OR (k = KEnd) OR
+    (k = KPgUp) OR (k = KPgDn)
+END IsMove;
+
+PROCEDURE Key(k: LONGINT);
+VAR p, ls, n: LONGINT; buf: Texts.Buffer; cut: BOOLEAN;
+BEGIN
+  cut := FALSE; msg := "";
+  IF (k # KUp) & (k # KDown) & (k # KPgUp) & (k # KPgDn) & (k # 19H) THEN goalCol := -1 END;
+  IF IsMove(k) & ODD(mods DIV Shift) & ODD(mods DIV Alt) THEN StartSel(TRUE); MoveBlock(k)
+  ELSIF IsMove(k) & ODD(mods DIV Shift) THEN StartSel(FALSE); Move(k)
+  ELSIF IsMove(k) OR (k = 19H) OR (k = 1) OR (k = 5) THEN ClearSel; Move(k)
+  ELSIF (k = 7FH) OR (k = 8) THEN  (* Backspace *)
+    IF selOn & block & (aCol = cCol) THEN BlockErase(TRUE)
+    ELSIF selOn THEN DeleteSel
+    ELSIF cur > 0 THEN p := PrevPos(cur); Delete(p, cur); cur := p
     END
+  ELSIF k = KDel THEN
+    IF selOn & block & (aCol = cCol) THEN BlockErase(FALSE)
+    ELSIF selOn THEN DeleteSel
+    ELSIF cur < T.len THEN Delete(cur, NextPos(cur))
+    END
+  ELSIF (k = 0DH) OR (k = 0AH) THEN IF selOn THEN DeleteSel; ClearSel END; Insert(Newline())
+  ELSIF k = 3 THEN  (* ^C: copy (without a selection Edit shows the location) *)
+    IF selOn THEN CopySel; msg := "Copied" END
+  ELSIF k = 0BH THEN  (* ^K: cut the selection, or the line *)
+    IF selOn THEN CopySel; DeleteSel; ClearSel; msg := "Cut"
+    ELSE
+      ls := LineStart(cur); p := NextLine(cur); IF p < 0 THEN p := T.len END;
+      IF p > ls THEN
+        IF ~lastCut OR (clip = NIL) OR clipBlock THEN NEW(clip); Texts.OpenBuf(clip); clipBlock := FALSE END;
+        NEW(buf); Texts.OpenBuf(buf); Texts.Save(T, ls, p, buf); Texts.Copy(buf, clip);
+        Delete(ls, p); cur := ls
+      END;
+      cut := TRUE
+    END
+  ELSIF (k = 16H) OR (k = 15H) THEN Paste; ClearSel  (* ^V, ^U *)
+  ELSIF k = KPaste THEN TerminalPaste; ClearSel
   ELSIF k = 0FH THEN IF WriteOut() THEN END
-  ELSIF k = 17H THEN Find
-  ELSIF k = 3 THEN  (* ^C again: the location was shown by Edit *)
+  ELSIF k = 17H THEN ClearSel; Find
   ELSIF k = 7 THEN ShowHelp
   ELSIF k = 0CH THEN (* ^L refresh *) Goto(1, 1); CSI("2J")
   ELSIF k = 18H THEN  (* ^X exit *)
@@ -505,7 +842,11 @@ BEGIN
       END
     ELSE running := FALSE
     END
-  ELSIF (k >= 20H) & (k < 100H) THEN Insert(CHR(k))
+  ELSIF (k = 9) OR (k >= 20H) & (k < 100H) THEN  (* a character: replaces the selection *)
+    IF k = 9 THEN k := ORD(TAB) END;
+    IF selOn & block THEN BlockType(CHR(k))
+    ELSE IF selOn THEN DeleteSel END; Insert(CHR(k))
+    END
   ELSIF k = -1 THEN running := FALSE  (* end of input *)
   END;
   lastCut := cut
@@ -535,14 +876,15 @@ BEGIN
     Texts.Open(T, name); msg := ""
   ELSE Texts.Open(T, name); plain := TRUE; msg := "New File"
   END;
-  cur := 0; top := 0; hcol := 0; goalCol := -1; modified := FALSE; lastCut := FALSE; cutBuf := NIL;
+  cur := 0; top := 0; hcol := 0; goalCol := -1; modified := FALSE; lastCut := FALSE; clip := NIL; clipBlock := FALSE;
+  selOn := FALSE; block := FALSE; mods := 0;
   Texts.OpenWriter(W);
   IF ~Raw() THEN RETURN END;
   running := TRUE;
   WHILE running DO
     Draw;
     k := ReadKey();
-    IF k = 3 THEN Draw; Location; Flush; k := ReadKey() END;  (* ^C shows the location until the next key *)
+    IF (k = 3) & ~selOn THEN Draw; Location; Flush; k := ReadKey() END;  (* ^C shows the location until the next key *)
     Key(k)
   END;
   Restore
