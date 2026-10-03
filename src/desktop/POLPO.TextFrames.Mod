@@ -1251,7 +1251,10 @@ END MulDiv;
   END Defocus;
 
   PROCEDURE Neutralize* (F: Frame);
-  BEGIN RemoveMarks(F)
+  BEGIN
+    IF blockF = F THEN EndBlock  (* polpo: Esc ends a block, the caret stays to go on typing *)
+    ELSE RemoveMarks(F)
+    END
   END Neutralize;
 
   PROCEDURE Modify* (F: Frame; id, dY, Y, H: INTEGER);
