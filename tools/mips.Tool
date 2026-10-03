@@ -82,6 +82,7 @@ mcompiler.Compile /s src/lib/tls/TLSNow.Mod
 mcompiler.Compile /s src/lib/tls/TLS13Live.Mod
 mcompiler.Compile /s src/lib/tls/httpsPure.Mod
 mcompiler.Compile /s src/cli/fetch.Mod
+mcompiler.Compile /s src/cli/gemini.Mod
 mcompiler.Compile /s src/cli/net.Mod
 
 # native MIPS compiler and boot linker, so the MIPS system can rebuild itself

@@ -149,6 +149,7 @@ connection), and `fetch` uses it:
 bin/x86/loksh fetch.Show http://example.com/          # the body on the screen
 bin/x86/loksh fetch.Get http://[::1]:8080/a.tar a.tar  # saved; without a file name: the last part of the path
 bin/x86/loksh fetch.Get https://example.com/ page.html # TLS 1.3
+bin/x86/loksh gemini.Get gemini://norayr.am/gd.gif     # Gemini; gemini.Show prints the page
 ```
 
 HTTPS is TLS 1.3 written in Oberon (`src/lib/tls`, the modules of github.com/norayr/tls; only
@@ -161,6 +162,8 @@ IP address, CertificateVerify verifies and its Finished is right; otherwise the 
 refused and the server is sent the alert that says why. The ServerHello is checked strictly (no
 downgrade), KeyUpdate is followed, and a body that ends without its length, its last chunk or TLS
 close_notify is reported incomplete (fetch does not save it). `fetch.Verbose` shows the handshake.
+`gemini` trusts a server without a CA on first use, as the Gemini specification recommends: the
+SHA-256 of its key is kept in `$HOME/.gemini_hosts`, and a different key later is refused.
 `tools/fromvoc.py` copies a module of the tls repository with polpo's imports; the tests are in
 `src/lib/tls/test` (`TLS_TEST_CERTS=src/lib/tls/test/certs loksh TLSTestChain.Run` and so on).
 

@@ -77,6 +77,7 @@ compiler.Compile /s src/lib/tls/TLSNow.Mod
 compiler.Compile /s src/lib/tls/TLS13Live.Mod
 compiler.Compile /s src/lib/tls/httpsPure.Mod
 compiler.Compile /s src/cli/fetch.Mod
+compiler.Compile /s src/cli/gemini.Mod
 compiler.Compile /s src/cli/net.Mod
 compiler.Compile /s src/cli/bdffont.Mod
 compiler.Compile /s src/cli/grep.Mod

@@ -4,6 +4,7 @@ IMPORT Out := out, TLSBytes, TLS13Records, TLS13Keys, TLS13Finished, TLS13Certs,
 CONST
   EncryptedExtensions* = 8;
   Certificate* = 11;
+  CertificateRequest* = 13;
   CertificateVerify* = 15;
   Finished* = 20;
 
@@ -14,8 +15,9 @@ TYPE
   CertPtr = POINTER TO TLSX509.CertInfo;
 
 VAR
-  stage: LONGINT;      (* 0: expecting EncryptedExtensions, 1 Certificate, 2 CertificateVerify,
-                          3 Finished, 4 done (RFC 8446 2: no PSK, no client certificate) *)
+  stage: LONGINT;      (* 0: expecting EncryptedExtensions, 1 Certificate (or CertificateRequest
+                          before it), 2 CertificateVerify, 3 Finished, 4 done (RFC 8446 2: no PSK) *)
+  certRequested: BOOLEAN; reqContext: TLSBytes.Buffer;  (* a CertificateRequest and its context *)
   cvOK: BOOLEAN;       (* the CertificateVerify signature verified *)
   leaf: CertPtr;
   expectedHost: ARRAY 256 OF CHAR;
@@ -50,8 +52,15 @@ END ResetCapturedCerts;
 (** before a handshake: nothing seen yet *)
 PROCEDURE ResetState*;
 BEGIN
-  stage := 0; cvOK := FALSE; ResetCapturedCerts
+  stage := 0; cvOK := FALSE; certRequested := FALSE; TLSBytes.Init(reqContext); ResetCapturedCerts
 END ResetState;
+
+(** the server asked for a client certificate (CertificateRequest); ctx: its request context, to
+  be echoed in the Certificate of the client *)
+PROCEDURE CertificateRequested*(VAR ctx: TLSBytes.Buffer): BOOLEAN;
+BEGIN
+  TLSBytes.Copy(reqContext, ctx); RETURN certRequested
+END CertificateRequested;
 
 (** the server proved with CertificateVerify that it has the key of its certificate *)
 PROCEDURE CertificateVerifyOK*(): BOOLEAN;
@@ -208,9 +217,15 @@ BEGIN
         IF verbose THEN Out.String("  hs msg type="); Out.Int(typ, 0); Out.String(" total="); Out.Int(total, 0); Out.String(" transcript before="); Out.Int(transcript.len, 0); Out.Ln END;
         TLSBytes.Slice(partial, pos, total, msg);
 
-        (* the order of RFC 8446 2; anything else (CertificateRequest too) ends the handshake *)
+        (* the order of RFC 8446 2; anything else ends the handshake *)
         IF typ = EncryptedExtensions THEN
           IF stage # 0 THEN RETURN FALSE END; stage := 1
+        ELSIF typ = CertificateRequest THEN  (* RFC 8446 4.3.2: context <0..255>, extensions <2..2^16-1> *)
+          IF (stage # 1) OR certRequested OR (msg.len < 5) THEN RETURN FALSE END;
+          bodyLen := ORD(msg.data[4]);
+          IF (msg.len < 5 + bodyLen + 2) OR (TLSBytes.GetBE16(msg, 5 + bodyLen) < 2) OR
+             (5 + bodyLen + 2 + TLSBytes.GetBE16(msg, 5 + bodyLen) # msg.len) THEN RETURN FALSE END;
+          TLSBytes.Slice(msg, 5, bodyLen, reqContext); certRequested := TRUE
         ELSIF typ = Certificate THEN
           IF (stage # 1) OR (msg.len < 5) OR (msg.data[4] # 0X) THEN RETURN FALSE END;  (* empty request context *)
           DebugCertificateMessage(msg);

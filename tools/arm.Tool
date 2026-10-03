@@ -83,6 +83,7 @@ acompiler.Compile /s src/lib/tls/TLSNow.Mod
 acompiler.Compile /s src/lib/tls/TLS13Live.Mod
 acompiler.Compile /s src/lib/tls/httpsPure.Mod
 acompiler.Compile /s src/cli/fetch.Mod
+acompiler.Compile /s src/cli/gemini.Mod
 acompiler.Compile /s src/cli/net.Mod
 
 # native ARM compiler and boot linker, so the ARM system can rebuild itself

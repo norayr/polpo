@@ -3,7 +3,7 @@ IMPORT SYSTEM, Linux0, Out := out,
        Internet, TLSBytes, TLS13Random, TLSX25519,
        TLS13Handshake, TLS13Keys, TLS13Records,
        TLS13EncHandshake, TLS13ClientFinished, TLS13Application,
-       TLSCABundle, TLSX509Validity, TLSNow, TLSX509Chain, TLSHKDF, TLSECDSA;
+       TLSCABundle, TLSX509Validity, TLSNow, TLSX509Chain, TLSHKDF, TLSECDSA, TLSX509, TLSSHA256;
 
 CONST
   MaxRecord = 16640;          (* 2^14 + 256, the longest TLSCiphertext (RFC 8446 5.2) *)
@@ -20,7 +20,8 @@ TYPE
   Chain = POINTER TO ChainDesc;
   ChainDesc = RECORD
     certs: ARRAY 8 OF TLSBytes.Buffer;
-    ca: TLSCABundle.Bundle
+    ca: TLSCABundle.Bundle;
+    leaf: TLSX509.CertInfo
   END;
 
   State* = RECORD
@@ -44,6 +45,9 @@ VAR
      as module variables too far for the PC relative addresses of its ARMv7 compiler *)
   chain: Chain;
   alertDesc: LONGINT;  (* the alert for a failed handshake, 0: none *)
+  pinMode: BOOLEAN; pinWant: ARRAY 65 OF CHAR;  (* ConnectPinned: the key expected, "" on first use *)
+  keyPin*: ARRAY 65 OF CHAR;  (** SHA-256 of the SubjectPublicKeyInfo of the last server, in hex *)
+  pinned*: BOOLEAN;  (** the last ConnectPinned accepted the server by keyPin, not by a CA *)
   hsKeys: BOOLEAN;     (* the client handshake key is in clientAppKey, IV: alerts are encrypted *)
 
 PROCEDURE Init*(VAR s: State);
@@ -208,6 +212,23 @@ BEGIN
   RETURN TRUE
 END RefusedByAlert;
 
+(* keyPin := the SHA-256 of the key of the leaf in chain.certs[0], hex; "" if it is malformed *)
+PROCEDURE KeyPin;
+VAR d: TLSSHA256.Digest; i, v: LONGINT;
+BEGIN
+  keyPin := "";
+  IF TLSX509.ParseCertificate(chain.certs[0], chain.leaf) THEN
+    TLSSHA256.DigestBuffer(chain.leaf.spki, d);
+    i := 0;
+    WHILE i < 32 DO
+      v := ORD(d[i]) DIV 16; IF v < 10 THEN keyPin[2*i] := CHR(ORD("0") + v) ELSE keyPin[2*i] := CHR(ORD("a") + v - 10) END;
+      v := ORD(d[i]) MOD 16; IF v < 10 THEN keyPin[2*i+1] := CHR(ORD("0") + v) ELSE keyPin[2*i+1] := CHR(ORD("a") + v - 10) END;
+      INC(i)
+    END;
+    keyPin[64] := 0X
+  END
+END KeyPin;
+
 PROCEDURE CheckCapturedCertificateChain(host: ARRAY OF CHAR): BOOLEAN;
 VAR
   i, n: LONGINT;
@@ -249,6 +270,15 @@ BEGIN
   IF verbose THEN Out.String(" namesOK="); IF res.allNamesOK THEN Out.String("true") ELSE Out.String("false") END END;
   IF verbose THEN Out.String(" failedAt="); Out.Int(res.failedAt, 0); Out.Ln END;
 
+  KeyPin();
+  IF pinMode & (~ok OR ~TLS13EncHandshake.HostnameOK()) THEN  (* not by a CA: trust on first use *)
+    IF ~TLS13EncHandshake.CertificateVerifyOK() THEN Abort(DecryptError, "CertificateVerify did not verify"); RETURN FALSE END;
+    IF keyPin = "" THEN Abort(BadCertificate, "the certificate of the server is malformed"); RETURN FALSE END;
+    IF (pinWant # "") & (pinWant # keyPin) THEN
+      Abort(BadCertificate, "the key of the server is not the one seen before (trust on first use)"); RETURN FALSE
+    END;
+    pinned := TRUE; RETURN TRUE
+  END;
   IF ~ok THEN
     IF ~res.leafParsed THEN Abort(BadCertificate, "the certificate of the server is malformed")
     ELSIF ~res.allTimesOK THEN Abort(CertificateExpired, "a certificate of the chain is expired or not yet valid")
@@ -271,12 +301,13 @@ VAR
   rec, serverHelloMsg, serverPub, shared, th, serverFrag: TLSBytes.Buffer;
   cHsKey, cHsIV, sHsKey, sHsIV, cFinKey, sFinKey: TLSBytes.Buffer;
   hsSecret, masterSecret, clientFinishedRec, clientFinishedMsg, thServerFinished: TLSBytes.Buffer;
+  thClient, reqCtx, certMsg: TLSBytes.Buffer;  (* the transcript for our Finished, a certificate request *)
   sawFinished, finishedOK, zero: BOOLEAN;
   group, tries: LONGINT; cookie, p256Priv, p256Pub, h: TLSBytes.Buffer;
   serverHSSeq, clientHSSeq: LONGINT;
   why: ARRAY 128 OF CHAR;
 BEGIN
-  Init(s); lastError := ""; alertDesc := 0; hsKeys := FALSE;
+  Init(s); lastError := ""; alertDesc := 0; hsKeys := FALSE; pinned := FALSE; keyPin := "";
   TLS13EncHandshake.verbose := verbose;
   TLS13EncHandshake.ResetState;
   TLS13EncHandshake.SetExpectedHost(host);
@@ -376,8 +407,20 @@ BEGIN
   TLSBytes.Copy(th, thServerFinished);
 
   clientHSSeq := 0;
+  TLSBytes.Copy(thServerFinished, thClient);
+  IF TLS13EncHandshake.CertificateRequested(reqCtx) THEN
+    (* RFC 8446 4.4.2: no certificate of ours, an empty Certificate echoing the request context;
+       no CertificateVerify; the Finished covers it *)
+    TLSBytes.Init(certMsg); TLSBytes.AppendByte(certMsg, TLS13EncHandshake.Certificate);
+    TLSBytes.PutBE24(certMsg, 1 + reqCtx.len + 3);
+    TLSBytes.AppendByte(certMsg, reqCtx.len); TLSBytes.Append(certMsg, reqCtx); TLSBytes.PutBE24(certMsg, 0);
+    TLS13Records.ProtectRecord(cHsKey, cHsIV, clientHSSeq, TLS13Records.Handshake, certMsg, rec);
+    IF ~WriteAll(s.fd, rec) THEN Fail("writing the empty client Certificate failed"); RETURN FALSE END;
+    TLSBytes.Append(thClient, certMsg); INC(clientHSSeq); s.clientAppSeq := clientHSSeq;
+    IF verbose THEN Out.String("TLS13Live: the server asked for a client certificate, sent none"); Out.Ln END
+  END;
   IF verbose THEN Out.String("TLS13Live: building client Finished"); Out.Ln END;
-  TLS13ClientFinished.BuildClientFinishedRecord(cHsKey, cHsIV, clientHSSeq, thServerFinished, cFinKey, clientFinishedRec, clientFinishedMsg);
+  TLS13ClientFinished.BuildClientFinishedRecord(cHsKey, cHsIV, clientHSSeq, thClient, cFinKey, clientFinishedRec, clientFinishedMsg);
   DumpBuffer("client finished msg", clientFinishedMsg);
   DumpRecordInfo("client finished rec", clientFinishedRec);
 
@@ -413,6 +456,18 @@ BEGIN
   Init(s);
   RETURN FALSE
 END Connect;
+
+(** Connect, for protocols that trust on first use (Gemini): a server not verified by a CA (its
+  chain, or the host name) is accepted if CertificateVerify shows that it has the key whose
+  SHA-256 is pin (hex), or any key if pin is ""; then pinned is set. keyPin is the key to keep. *)
+PROCEDURE ConnectPinned*(host, port: ARRAY OF CHAR; VAR s: State; pin: ARRAY OF CHAR): BOOLEAN;
+VAR ok: BOOLEAN;
+BEGIN
+  pinMode := TRUE; COPY(pin, pinWant);
+  ok := Connect(host, port, s);
+  pinMode := FALSE;
+  RETURN ok
+END ConnectPinned;
 
 (* the alert close_notify to the server; FALSE if it could not be written *)
 PROCEDURE SendCloseNotify(VAR s: State): BOOLEAN;
@@ -592,5 +647,5 @@ BEGIN
 END ReadApp;
 
 BEGIN
-  verbose := FALSE; alertDesc := 0; hsKeys := FALSE; chain := NIL
+  verbose := FALSE; alertDesc := 0; hsKeys := FALSE; chain := NIL; pinMode := FALSE; pinned := FALSE; keyPin := ""
 END TLS13Live.

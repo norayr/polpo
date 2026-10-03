@@ -82,6 +82,7 @@ rvcompiler.Compile /s src/lib/tls/TLSNow.Mod
 rvcompiler.Compile /s src/lib/tls/TLS13Live.Mod
 rvcompiler.Compile /s src/lib/tls/httpsPure.Mod
 rvcompiler.Compile /s src/cli/fetch.Mod
+rvcompiler.Compile /s src/cli/gemini.Mod
 rvcompiler.Compile /s src/cli/net.Mod
 
 # native RISC-V compiler and boot linker, so the RISC-V system can rebuild itself

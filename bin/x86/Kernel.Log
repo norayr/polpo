@@ -1,0 +1,28 @@
+ETH Oberon / Linux X86 2015-12-11
+StackOrg  FFEE0410
+08059C18 loksh
+08055998 Modules0
+08052B18 Files
+080516E8 Root
+0804C148 Kernel
+080491B8 Linux0
+Heap growing:  08443000 09443000
+(GC 1ms CG)
+CmdLine: 2 ./loksh2 Kernel.Version
+OTRACE= not found
+POLPO= not found
+08457858 shell
+0845B898 in
+0845C4A8 out
+0845CE28 termios
+0845D928 FATFiles
+0845EF68 Modules
+0845F928 Oberon0
+084607F8 texts
+08461498 objects
+08461DC8 Objects0
+08467648 Texts0
+0846DF58 Reals
+08471B98 oberon
+08472498 strings
+Modules: Kernel.Version command not found

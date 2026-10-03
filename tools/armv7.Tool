@@ -83,6 +83,7 @@ a7compiler.Compile /s src/lib/tls/TLSNow.Mod
 a7compiler.Compile /s src/lib/tls/TLS13Live.Mod
 a7compiler.Compile /s src/lib/tls/httpsPure.Mod
 a7compiler.Compile /s src/cli/fetch.Mod
+a7compiler.Compile /s src/cli/gemini.Mod
 a7compiler.Compile /s src/cli/net.Mod
 
 # native ARMv7 compiler and boot linker, so the ARMv7 system can rebuild itself
